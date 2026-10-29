@@ -11,10 +11,18 @@ What it does
 
 * **Browse** the snapshots of every local btrbk source subvolume, newest first, with the live
   subvolume ("Now") on top and the btrbk backup status of each snapshot.
-* **Compare** any two snapshots (or a snapshot and the live subvolume): created, deleted and changed
-  files with a diff view, or open the two trees in [meld](https://meldmerge.org/).
-  Comparison walks the snapshot directories, so unlike `btrfs subvolume find-new` it also
-  sees deleted files.
+* **Compare** any two snapshots (or a snapshot and the live subvolume) in a changes window, with a
+  per-file Details pane and a diff view, or open the two trees in
+  [meld](https://meldmerge.org/).
+  The comparison uses `btrfs send --no-data -p <older> <newer> | btrfs receive --dump`: it reads
+  btrfs metadata only, so it is fast on large subvolumes, and it reports everything the filesystem
+  recorded: created and deleted files, **renames and moves**, rewritten data ranges and truncation,
+  chmod/chown, xattrs and ACLs, symlinks, hard links, and timestamps. The stream's replay
+  noise (temporary `oNNN-NN-N` names, link+unlink pairs, unlink+create replacements) is folded back
+  into what happened to each path. Comparing against the live subvolume takes a short-lived
+  read-only snapshot next to your snapshots and deletes it again. If the stream can't be used (for
+  example the older side is the live state), it falls back to a directory walk and the status bar
+  says so.
 * **Restore** a single file or directory from a snapshot (`cp --reflink`) into the live subvolume.
 * **Roll back** a subvolume to a snapshot. The current subvolume is renamed to
   `<subvolume>.rollback.<timestamp>`, never deleted. A confirmation dialog shows the exact steps.
@@ -37,6 +45,7 @@ loads code you can modify. It also:
 * only accepts a btrbk config that is owned by root with root-owned, non-group/world-writable parent
   directories, so an unprivileged user cannot point it at their own config;
 * only acts on snapshots that `btrbk list snapshots` reports for that config;
+* limits `stream-diff` to two snapshots of the same source (or one plus its live subvolume);
 * rejects `..`, absolute and symlink-escaping paths in restore requests;
 * supports `--dry-run` for delete, restore and rollback; the GUI always shows the dry-run first.
 

@@ -16,6 +16,8 @@ class StatusFlags(object):
     GROUP       =  64  # group has changed, see chown(2)
     XATTRS      = 128  # extended attributes changed, see attr(5)
     ACL         = 256  # access control list changed, see acl(5)
+    RENAMED     = 512  # moved or renamed (not in snapper; from the btrfs send stream)
+    MTIME       = 1024  # only timestamps changed (not in snapper)
     # @formatter:on
 
 

@@ -148,6 +148,66 @@ def cmd_snapshot(args):
     sys.stdout.write(btrbk(args.config, *cmd))
 
 
+TMP_PREFIX = ".btrbrowse-tmp-"
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def sweep_stale_temp(directory):
+    """Remove temporary read-only snapshots left behind by a killed helper."""
+    for name in os.listdir(directory):
+        m = re.match(r"^%s(\d+)$" % re.escape(TMP_PREFIX), name)
+        path = os.path.join(directory, name)
+        if m and not pid_alive(int(m.group(1))) and is_subvolume(path):
+            run(["btrfs", "subvolume", "delete", "--", path], check=False)
+
+
+def cmd_stream_diff(args):
+    """Print the `btrfs receive --dump` of the --no-data incremental stream between two snapshots.
+
+    Read-only apart from, with --live, one short-lived read-only snapshot of the live
+    subvolume next to the snapshots (btrfs can only send read-only subvolumes).
+    """
+    begin, brow = get_snapshot(args.config, args.begin)
+    temp = None
+    if args.live:
+        live = os.path.realpath(brow["source_subvolume"])
+        directory = os.path.dirname(begin)
+        sweep_stale_temp(directory)
+        temp = os.path.join(directory, "%s%d" % (TMP_PREFIX, os.getpid()))
+        run(["btrfs", "subvolume", "snapshot", "-r", "--", live, temp])
+        end = temp
+    else:
+        end, erow = get_snapshot(args.config, args.end)
+        if erow["source_subvolume"] != brow["source_subvolume"]:
+            raise HelperError("snapshots belong to different subvolumes")
+    try:
+        env = {"PATH": SAFE_PATH, "LC_ALL": "C", "LANG": "C"}
+        send = subprocess.Popen(["btrfs", "send", "-q", "--no-data", "-p", begin, end],
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        recv = subprocess.Popen(["btrfs", "receive", "--dump"], env=env, stdin=send.stdout,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                universal_newlines=True, errors="surrogateescape")
+        send.stdout.close()
+        out, err = recv.communicate()
+        send_err = send.stderr.read().decode(errors="replace")
+        send.wait()
+        if send.returncode != 0 or recv.returncode != 0:
+            raise HelperError("btrfs send/receive failed: %s" % (send_err.strip() or err.strip()))
+        sys.stdout.write(out)
+    finally:
+        if temp:
+            run(["btrfs", "subvolume", "delete", "--", temp], check=False)
+
+
 def cmd_delete(args):
     targets = [get_snapshot(args.config, p)[0] for p in args.snapshots]
     for sub in targets:
@@ -233,6 +293,12 @@ def main(argv):
     p.add_argument("source", nargs="?")
     p.set_defaults(func=cmd_snapshot)
 
+    p = sub.add_parser("stream-diff")
+    p.add_argument("--live", action="store_true", help="compare BEGIN with the live subvolume")
+    p.add_argument("begin")
+    p.add_argument("end", nargs="?")
+    p.set_defaults(func=cmd_stream_diff)
+
     p = sub.add_parser("delete")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("snapshots", nargs="+")
@@ -250,6 +316,8 @@ def main(argv):
     p.set_defaults(func=cmd_rollback)
 
     args = parser.parse_args(argv)
+    if args.verb == "stream-diff" and not args.live and not args.end:
+        parser.error("stream-diff needs END or --live")
     if os.geteuid() != 0:
         print("btrbrowse-helper must run as root", file=sys.stderr)
         return 2

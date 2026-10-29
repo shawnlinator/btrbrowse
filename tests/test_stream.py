@@ -1,0 +1,127 @@
+import os
+import unittest
+
+from btrbrowse.compare import StatusFlags as F
+from btrbrowse.stream import fold, parse_dump, unescape
+
+DUMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "send-dump.txt")
+
+
+class UnescapeTest(unittest.TestCase):
+    def test_space_and_backslash(self):
+        self.assertEqual(unescape(r"sp\ ace\\x"), "sp ace\\x")
+
+    def test_octal_and_control(self):
+        self.assertEqual(unescape(r"a\011b\nc"), "a\tb\nc")
+
+    def test_plain_text_unchanged(self):
+        self.assertEqual(unescape("./s-new/tree/f.txt"), "./s-new/tree/f.txt")
+
+
+class ParseTest(unittest.TestCase):
+    def test_root_and_ops(self):
+        root, ops = parse_dump("snapshot  ./s-new   uuid=1 transid=2\n"
+                               "unlink    ./s-new/sp\\ ace.txt\n")
+        self.assertEqual(root, "./s-new")
+        self.assertEqual(ops[1]["path"], "./s-new/sp ace.txt")
+
+
+class FoldRealDumpTest(unittest.TestCase):
+    """tests/data/send-dump.txt is real `btrfs receive --dump` output of a fixture."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(DUMP) as f:
+            cls.changes = fold(f.read())
+
+    def has(self, path, flag):
+        self.assertIn(path, self.changes)
+        self.assertTrue(self.changes[path].status & flag,
+                        "%s: status %d lacks %d" % (path, self.changes[path].status, flag))
+
+    def text(self, path):
+        return " | ".join(self.changes[path].details)
+
+    def test_new_file_is_created_not_a_temp_name(self):
+        self.has("/newdir/n.txt", F.CREATED)
+        self.assertFalse([p for p in self.changes if "/o27" in p])
+
+    def test_new_directory(self):
+        self.has("/newdir", F.CREATED)
+
+    def test_deleted_file(self):
+        self.assertEqual(self.changes["/tree/hard.txt"].status, F.DELETED)
+
+    def test_hardlink_plus_unlink_is_a_rename(self):
+        self.has("/keep.txt", F.RENAMED)
+        self.has("/kept.txt", F.RENAMED)
+        self.assertIn("renamed from /keep.txt", self.text("/kept.txt"))
+        self.assertIn("renamed to /kept.txt", self.text("/keep.txt"))
+
+    def test_rename_with_escaped_space(self):
+        self.has("/sp ace2.txt", F.RENAMED)
+        self.assertIn("renamed to /sp ace2.txt", self.text("/sp ace.txt"))
+
+    def test_plain_rename_of_directory(self):
+        self.has("/other/sub-moved", F.RENAMED)
+        self.assertIn("renamed to /other/sub-moved", self.text("/tree/sub")
+                      + self.text("/tree/sub").replace("the previous item here was moved: ", ""))
+
+    def test_metadata_changes_on_renamed_file(self):
+        self.has("/kept.txt", F.PERMISSIONS)
+        self.has("/kept.txt", F.XATTRS)
+        self.assertIn("mode set to 600", self.text("/kept.txt"))
+        self.assertIn("xattr user.tag set to 'two'", self.text("/kept.txt"))
+
+    def test_extent_update_is_content_with_size(self):
+        self.has("/tree/f.txt", F.CONTENT)
+        self.assertIn("1 data range rewritten (11 bytes)", self.text("/tree/f.txt"))
+
+    def test_truncate(self):
+        self.has("/sparse.bin", F.CONTENT)
+        self.assertIn("truncated to 50000 bytes", self.text("/sparse.bin"))
+
+    def test_replaced_file_is_a_content_change(self):
+        self.has("/reflink.txt", F.CONTENT)
+        self.assertFalse(self.changes["/reflink.txt"].status & F.CREATED)
+        self.assertIn("replaced", self.text("/reflink.txt"))
+
+    def test_real_hardlink_is_created(self):
+        self.has("/tree/hard2.txt", F.CREATED)
+        self.assertIn("hard link to /tree/f.txt", self.text("/tree/hard2.txt"))
+
+    def test_symlink_replaced(self):
+        self.has("/tree/link", F.CONTENT)
+        self.assertIn("symlink -> g.txt", self.text("/tree/link"))
+
+    def test_directory_mtime_only_entries_exist_for_the_backend_to_filter(self):
+        self.assertEqual(self.changes["/tree"].status, F.MTIME)
+
+    def test_slot_reused_after_move(self):
+        self.assertIn("previous item here was moved", self.text("/tree/sub"))
+
+
+class FoldEdgeCasesTest(unittest.TestCase):
+    def test_created_then_deleted_leaves_nothing(self):
+        out = fold("snapshot ./r uuid=1\nmkfile ./r/o1-1-0\nrename ./r/o1-1-0 dest=./r/x\nunlink ./r/x\n")
+        self.assertEqual(out, {})
+
+    def test_root_entry_is_dropped(self):
+        out = fold("snapshot ./r uuid=1\nutimes ./r/ mtime=2026-01-01T00:00:00+0000\n")
+        self.assertEqual(out, {})
+
+    def test_remove_xattr_and_acl(self):
+        out = fold("snapshot ./r uuid=1\n"
+                   "remove_xattr ./r/f name=user.a\n"
+                   "set_xattr ./r/f name=system.posix_acl_access len=28\n")
+        self.assertTrue(out["/f"].status & F.XATTRS)
+        self.assertTrue(out["/f"].status & F.ACL)
+
+    def test_clone_mentions_source(self):
+        out = fold("snapshot ./r uuid=1\nclone ./r/f offset=0 len=4096 from=./r/g clone_offset=0\n")
+        self.assertTrue(out["/f"].status & F.CONTENT)
+        self.assertIn("cloned data from", " ".join(out["/f"].details))
+
+
+if __name__ == "__main__":
+    unittest.main()

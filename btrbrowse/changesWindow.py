@@ -1,7 +1,7 @@
 from btrbrowse import context
 from btrbrowse.btrbk import BtrbkError, CURRENT
 from btrbrowse.compare import StatusFlags
-import os, subprocess, time, difflib, collections
+import os, pwd, stat, subprocess, time, difflib, collections
 from gi.repository import Gtk, GtkSource, GObject, Gdk
 
 
@@ -38,7 +38,12 @@ class changesWindow(object):
         self.fileview.set_buffer(self.sourcebuffer)
 
         self.add_action_buttons(builder.get_object("buttonbox1"))
+        self.add_details_pane(builder.get_object("box3"))
+        self.details = {}
+        self.statuses = {}
+        self.loaded = False
         self.window.show_all()
+        GObject.idle_add(self.on_idle_init_paths_tree)
 
     def add_action_buttons(self, box):
         self.restore_button = Gtk.Button.new_with_label("Restore file")
@@ -49,6 +54,47 @@ class changesWindow(object):
         meld_button.connect("clicked", self.on_meld_clicked)
         box.pack_start(self.restore_button, False, False, 0)
         box.pack_start(meld_button, False, False, 0)
+
+    def add_details_pane(self, box):
+        self.details_view = Gtk.TextView()
+        self.details_view.set_editable(False)
+        self.details_view.set_cursor_visible(False)
+        self.details_view.set_monospace(True)
+        self.details_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_shadow_type(Gtk.ShadowType.IN)
+        scrolled.set_min_content_height(110)
+        scrolled.add(self.details_view)
+        expander = Gtk.Expander.new("Details")
+        expander.set_expanded(True)
+        expander.add(scrolled)
+        box.pack_start(expander, False, False, 0)
+        box.reorder_child(expander, 1)
+
+    def describe_file(self, label, path):
+        try:
+            st = os.lstat(path)
+        except OSError:
+            return "%s: not present" % label
+        try:
+            owner = pwd.getpwuid(st.st_uid).pw_name
+        except KeyError:
+            owner = str(st.st_uid)
+        return "%s: %s %s %d bytes, modified %s" % (
+            label, stat.filemode(st.st_mode), owner, st.st_size,
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)))
+
+    def show_details(self, path):
+        lines = []
+        if path:
+            lines.append(self.file_status_to_string(self.statuses.get(path, 0)))
+            lines += ["  - " + d for d in self.details.get(path, [])]
+            lines.append("")
+            for label, number, base in (("before", self.snapshot_begin, self.beginpath),
+                                        ("after", self.snapshot_end, self.endpath)):
+                name = "current" if number == CURRENT else "snapshot %s" % number
+                lines.append(self.describe_file("%s (%s)" % (label, name), base + path))
+        self.details_view.get_buffer().set_text("\n".join(lines))
 
     def selected_path(self):
         model, treeiter = self.pathstreeview.get_selection().get_selected()
@@ -120,6 +166,8 @@ class changesWindow(object):
             return "Deleted"
         elif status > 0:  # Modified file
             modification_types = {
+                StatusFlags.RENAMED: "renamed",
+                StatusFlags.MTIME: "timestamps",
                 StatusFlags.ACL: "acl",
                 StatusFlags.CONTENT: "content",
                 StatusFlags.GROUP: "group",
@@ -173,8 +221,14 @@ class changesWindow(object):
             else:
                 return False
 
-    def on_idle_init_paths_tree(self):
-        dbus_array = context.backend.GetFiles(self.config, self.snapshot_begin, self.snapshot_end)
+    def on_idle_init_paths_tree(self, *args):
+        if self.loaded:
+            return False
+        self.loaded = True
+        comparison = context.backend.Compare(self.config, self.snapshot_begin, self.snapshot_end)
+        dbus_array = comparison.changes
+        self.details = comparison.details
+        self.statuses = dict(dbus_array)
 
         # create structure to sort paths into tree
         files_tree = changesWindow.TreeNode("/", {}, 0, True)
@@ -186,7 +240,10 @@ class changesWindow(object):
         # self.pathstreeview.expand_all()
 
         # display in statusbar how many files have changed
-        self.statusbar.push(1, "%d files" % len(dbus_array))
+        message = "%d files, via %s" % (len(dbus_array), comparison.method)
+        if comparison.note:
+            message += " (%s)" % comparison.note
+        self.statusbar.push(1, message)
 
         # we dont want this function to be called anymore
         return False
@@ -207,6 +264,8 @@ class changesWindow(object):
 
     def _on_pathstree_selection_changed(self, selection):
         (model, treeiter) = selection.get_selected()
+        if hasattr(self, "details_view"):
+            self.show_details(model[treeiter][2] if treeiter is not None else None)
         if hasattr(self, "restore_button"):
             can_restore = (treeiter is not None and bool(model[treeiter][2]) and
                            self.snapshot_begin != CURRENT and

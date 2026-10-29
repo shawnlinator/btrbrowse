@@ -48,6 +48,46 @@ class IntegrationTest(unittest.TestCase):
         self.backend.DeleteSnapshots(SOURCE, [newest])
         self.assertEqual(len(self.names()), before)
 
+    def test_stream_compare_sees_deletes_renames_and_cleans_up(self):
+        a = os.path.join(SOURCE, "it-stream-a.txt")
+        with open(a, "w") as f:
+            f.write("data")
+        self.backend.CreateSingleSnapshot(SOURCE)
+        older = self.backend.ListSnapshots(SOURCE)[-1][0]
+        b = os.path.join(SOURCE, "it-stream-b.txt")
+        try:
+            os.rename(a, b)
+            comparison = self.backend.Compare(SOURCE, older, CURRENT)
+            self.assertEqual(comparison.method, "btrfs send stream", comparison.note)
+            paths = dict(comparison.changes)
+            self.assertIn("/it-stream-a.txt", paths)
+            self.assertIn("/it-stream-b.txt", paths)
+            self.assertIn("renamed to /it-stream-b.txt", " ".join(comparison.details["/it-stream-a.txt"]))
+            parent = os.path.dirname(os.path.dirname(self.backend.GetMountPoint(SOURCE, older)))
+            leftovers = [d for d in os.listdir(os.path.join(parent, "snaps")) if d.startswith(".btrbrowse-tmp-")]
+            self.assertEqual(leftovers, [])
+        finally:
+            for p in (a, b):
+                if os.path.exists(p):
+                    os.unlink(p)
+            self.backend.DeleteSnapshots(SOURCE, [older])
+
+    def test_stream_compare_between_two_snapshots(self):
+        self.backend.CreateSingleSnapshot(SOURCE)
+        first = self.backend.ListSnapshots(SOURCE)[-1][0]
+        marker = os.path.join(SOURCE, "it-between.txt")
+        with open(marker, "w") as f:
+            f.write("x")
+        self.backend.CreateSingleSnapshot(SOURCE)
+        second = self.backend.ListSnapshots(SOURCE)[-1][0]
+        try:
+            comparison = self.backend.Compare(SOURCE, first, second)
+            self.assertEqual(comparison.method, "btrfs send stream", comparison.note)
+            self.assertEqual(dict(comparison.changes).get("/it-between.txt") & 1, 1)
+        finally:
+            os.unlink(marker)
+            self.backend.DeleteSnapshots(SOURCE, [first, second])
+
     def test_restore_file(self):
         path = os.path.join(SOURCE, "it-restore.txt")
         with open(path, "w") as f:

@@ -1,0 +1,55 @@
+snapshot        ./s-new                         uuid=4bad8e73-4dd0-9644-a0e7-05ecc7d0f345 transid=27 parent_uuid=bc0d51cd-d9c9-5e47-9f5b-2a2e6ed5d6ac parent_transid=26
+rename          ./s-new/tree/sub                dest=./s-new/other/sub-moved
+link            ./s-new/tree/hard2.txt          dest=tree/f.txt
+unlink          ./s-new/tree/hard.txt
+update_extent   ./s-new/tree/f.txt              offset=0 len=11
+utimes          ./s-new/tree/f.txt              atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+unlink          ./s-new/tree/link
+link            ./s-new/kept.txt                dest=keep.txt
+unlink          ./s-new/keep.txt
+set_xattr       ./s-new/kept.txt                name=user.tag two len=3
+set_xattr       ./s-new/kept.txt                name=user.new x len=1
+chmod           ./s-new/kept.txt                mode=600
+utimes          ./s-new/kept.txt                atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+link            ./s-new/sp\ ace2.txt            dest=sp\ ace.txt
+unlink          ./s-new/sp\ ace.txt
+utimes          ./s-new/sp\ ace2.txt            atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+truncate        ./s-new/sparse.bin              size=50000
+utimes          ./s-new/sparse.bin              atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+unlink          ./s-new/reflink.txt
+symlink         ./s-new/o271-27-0               dest=g.txt
+rename          ./s-new/o271-27-0               dest=./s-new/tree/link
+chown           ./s-new/tree/link               gid=1000 uid=1000
+utimes          ./s-new/tree/link               atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+mkdir           ./s-new/o272-27-0
+rename          ./s-new/o272-27-0               dest=./s-new/newdir
+chown           ./s-new/newdir                  gid=1000 uid=1000
+chmod           ./s-new/newdir                  mode=775
+mkfile          ./s-new/o273-27-0
+rename          ./s-new/o273-27-0               dest=./s-new/newdir/n.txt
+update_extent   ./s-new/newdir/n.txt            offset=0 len=2
+chown           ./s-new/newdir/n.txt            gid=1000 uid=1000
+chmod           ./s-new/newdir/n.txt            mode=664
+utimes          ./s-new/newdir/n.txt            atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+mkfile          ./s-new/o274-27-0
+rename          ./s-new/o274-27-0               dest=./s-new/reflink2.txt
+update_extent   ./s-new/reflink2.txt            offset=0 len=5
+chown           ./s-new/reflink2.txt            gid=1000 uid=1000
+chmod           ./s-new/reflink2.txt            mode=600
+utimes          ./s-new/reflink2.txt            atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+mkfile          ./s-new/o275-27-0
+rename          ./s-new/o275-27-0               dest=./s-new/reflink.txt
+update_extent   ./s-new/reflink.txt             offset=0 len=9
+chown           ./s-new/reflink.txt             gid=1000 uid=1000
+chmod           ./s-new/reflink.txt             mode=664
+utimes          ./s-new/reflink.txt             atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+mkfile          ./s-new/o276-27-0
+rename          ./s-new/o276-27-0               dest=./s-new/tree/sub
+chown           ./s-new/tree/sub                gid=1000 uid=1000
+chmod           ./s-new/tree/sub                mode=664
+utimes          ./s-new/tree/sub                atime=2020-01-01T00:00:00-0700 mtime=2020-01-01T00:00:00-0700 ctime=2026-10-29T13:44:45-0600
+utimes          ./s-new/tree                    atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+utimes          ./s-new/                        atime=2026-10-29T13:19:07-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+utimes          ./s-new/newdir                  atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+utimes          ./s-new/other                   atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600
+utimes          ./s-new/other/sub-moved         atime=2026-10-29T13:44:45-0600 mtime=2026-10-29T13:44:45-0600 ctime=2026-10-29T13:44:45-0600

@@ -10,7 +10,8 @@ import re
 import subprocess
 import time
 
-from btrbrowse.compare import compare_trees
+from btrbrowse.compare import StatusFlags, compare_trees
+from btrbrowse.stream import fold
 
 DEFAULT_CONFIG = "/etc/btrbk/btrbk.conf"
 DEFAULT_HELPER = "/usr/libexec/btrbrowse-helper"
@@ -20,6 +21,19 @@ CURRENT = 0  # snapshot number of the live subvolume, like snapper's "current"
 
 class BtrbkError(Exception):
     pass
+
+
+class Comparison(object):
+    """Result of comparing two snapshots.
+
+    changes: [(path, status)] sorted by path; details: {path: [text, ...]};
+    method says how it was computed, note why a fallback was used (or "").
+    """
+    STREAM = "btrfs send stream"
+    WALK = "directory walk"
+
+    def __init__(self, changes, details, method, note=""):
+        self.changes, self.details, self.method, self.note = changes, details, method, note
 
 
 def parse_raw(text):
@@ -189,6 +203,41 @@ class Backend(object):
 
     def GetFiles(self, config, begin, end):
         return compare_trees(self.GetMountPoint(config, begin), self.GetMountPoint(config, end))
+
+    def Compare(self, config, begin, end):
+        """Compare two snapshots, preferring the btrfs send stream.
+
+        The stream (via the helper) lists every create, delete, rename, write range,
+        chmod, chown, xattr and timestamp change, including deletions and renames, without
+        reading file data. It needs two read-only subvolumes of the same source, with the
+        older one first; anything else, or any failure, falls back to a directory walk.
+        """
+        begin, end = int(begin), int(end)
+        try:
+            if begin == CURRENT:
+                raise BtrbkError("the live subvolume can only be the newer side")
+            first = self.GetMountPoint(config, begin)
+            if end == CURRENT:
+                args = ["stream-diff", "--live", first]
+            else:
+                args = ["stream-diff", first, self.GetMountPoint(config, end)]
+            changes = fold(self._call(*args))
+        except BtrbkError as e:
+            changes = None
+            note = str(e)
+        if changes is None:
+            walked = self.GetFiles(config, begin, end)
+            return Comparison(walked, {}, Comparison.WALK, "stream comparison unavailable: " + note)
+        beginpath, endpath = self.GetMountPoint(config, begin), self.GetMountPoint(config, end)
+        result, details = [], {}
+        for path in sorted(changes):
+            ch = changes[path]
+            if ch.status == StatusFlags.MTIME and (os.path.isdir(endpath + path)
+                                                   or os.path.isdir(beginpath + path)):
+                continue  # a directory's mtime changes whenever its entries do
+            result.append((path, ch.status))
+            details[path] = ch.details
+        return Comparison(result, details, Comparison.STREAM)
 
     def CreateSingleSnapshot(self, config):
         out = self._call("snapshot", self._config_row(config)[1])
