@@ -1,7 +1,7 @@
 [Desktop Entry]
-Name=Snapper GUI
-Comment=Frontend for snapper snapshot manager
-Exec=snapper-gui
+Name=btrbrowse
+Comment=Browse, compare and restore btrbk snapshots
+Exec=btrbrowse
 Icon=drive-harddisk
 Terminal=false
 Type=Application

@@ -3,23 +3,19 @@ try:
 except ImportError:
     from distutils.core import setup
 
-# from options["setup"] in build.vel
-
 config = {
-    'name': 'snappergui',
+    'name': 'btrbrowse',
     'version': '0.1',
-    'packages': ['snappergui'],
-    'description': 'snapper-gui graphical user interface for snapper btrfs snapshot manager',
-    'author': 'Ricardo Vieira',
-    'url': 'https://github.com/ricardo-vieira/snapper-gui',
-    'download_url': 'https://github.com/ricardo-vieira/snapper-gui',
-    'author_email': 'ricardo.vieira@ist.utl.pt',
-    'package_data': {"snappergui": ["glade/*.glade",
-                                    "icons/*.svg",
-                                    "ui/*.ui"]},
-    'data_files': [('share/applications', ['snapper-gui.desktop'])],
+    'packages': ['btrbrowse'],
+    'description': 'Graphical browser for btrbk snapshots, based on snapper-gui',
+    'author': 'Ricardo Vieira, btrbrowse contributors',
+    'url': 'https://github.com/shawnlinator/btrbrowse',
+    'package_data': {"btrbrowse": ["glade/*.glade",
+                                   "icons/*.svg",
+                                   "ui/*.ui"]},
+    'data_files': [('share/applications', ['btrbrowse.desktop'])],
     'entry_points': {'gui_scripts':
-                         ['snapper-gui = snappergui.application:start_ui']}
+                         ['btrbrowse = btrbrowse.application:start_ui']}
 }
 
 setup(**config)

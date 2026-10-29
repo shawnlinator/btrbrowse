@@ -1,11 +1,5 @@
-<interface domain="snappergui">
+<interface domain="btrbrowse">
   <menu id="app-menu">
-    <section>
-      <item>
-        <attribute name="action">app.properties</attribute>
-        <attribute name="label" translatable="yes">Properties</attribute>
-      </item>
-    </section>
     <section>
       <item>
         <attribute name="action">app.about</attribute>

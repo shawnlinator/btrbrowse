@@ -1,23 +1,8 @@
-from snappergui import snapper
-import pkg_resources, os, time, difflib, collections
+from btrbrowse import context
+from btrbrowse.btrbk import BtrbkError, CURRENT
+from btrbrowse.compare import StatusFlags
+import os, subprocess, time, difflib, collections
 from gi.repository import Gtk, GtkSource, GObject, Gdk
-
-
-class StatusFlags(object):
-    """File status flags from https://github.com/openSUSE/snapper/blob/master/snapper/File.h#L39-L51"""
-
-    # @formatter:off
-    CREATED     =   1  # created
-    DELETED     =   2  # deleted
-    TYPE        =   4  # type has changed
-    CONTENT     =   8  # content has changed
-    PERMISSIONS =  16  # permissions have changed, see chmod(2)
-    OWNER       =  32  # owner has changed, see chown(2)
-    USER        =  32  # deprecated - alias for OWNER
-    GROUP       =  64  # group has changed, see chown(2)
-    XATTRS      = 128  # extended attributes changed, see attr(5)
-    ACL         = 256  # access control list changed, see acl(5)
-    # @formatter:on
 
 
 class changesWindow(object):
@@ -29,8 +14,7 @@ class changesWindow(object):
         super(changesWindow, self).__init__()
         builder = Gtk.Builder()
         GObject.type_register(GtkSource.View)
-        builder.add_from_file(pkg_resources.resource_filename("snappergui",
-                                                              "glade/changesWindow.glade"))
+        builder.add_from_file(context.resource("glade", "changesWindow.glade"))
 
         builder.get_object("titlelabel").set_text("%s -> %s" % (begin, end))
         self.window = builder.get_object("changesWindow")
@@ -41,8 +25,8 @@ class changesWindow(object):
         builder.connect_signals(self)
 
         # save mountpoints for begin and end snapshots
-        self.beginpath = snapper.GetMountPoint(config, begin)
-        self.endpath = snapper.GetMountPoint(config, end)
+        self.beginpath = context.backend.GetMountPoint(config, begin)
+        self.endpath = context.backend.GetMountPoint(config, end)
         self.config = config
         self.snapshot_begin = begin
         self.snapshot_end = end
@@ -53,8 +37,59 @@ class changesWindow(object):
         self.sourcebuffer = GtkSource.Buffer()
         self.fileview.set_buffer(self.sourcebuffer)
 
+        self.add_action_buttons(builder.get_object("buttonbox1"))
         self.window.show_all()
-        GObject.idle_add(self.on_idle_init_paths_tree)
+
+    def add_action_buttons(self, box):
+        self.restore_button = Gtk.Button.new_with_label("Restore file")
+        self.restore_button.set_tooltip_text("Copy the selected file from the first snapshot back into the live subvolume")
+        self.restore_button.set_sensitive(False)
+        self.restore_button.connect("clicked", self.on_restore_clicked)
+        meld_button = Gtk.Button.new_with_label("Open in meld")
+        meld_button.connect("clicked", self.on_meld_clicked)
+        box.pack_start(self.restore_button, False, False, 0)
+        box.pack_start(meld_button, False, False, 0)
+
+    def selected_path(self):
+        model, treeiter = self.pathstreeview.get_selection().get_selected()
+        if treeiter is None or not model[treeiter][2]:
+            return None
+        return model[treeiter][2]
+
+    def show_error(self, message):
+        dialog = Gtk.MessageDialog(self.window, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, message)
+        dialog.run()
+        dialog.destroy()
+
+    def on_meld_clicked(self, widget):
+        path = self.selected_path() or ""
+        try:
+            subprocess.Popen(["meld", self.beginpath + path, self.endpath + path])
+        except OSError as e:
+            self.show_error("Could not start meld: %s" % e)
+
+    def on_restore_clicked(self, widget):
+        path = self.selected_path()
+        if path is None:
+            return
+        backend = context.backend
+        try:
+            plan = backend.RestoreFile(self.config, self.snapshot_begin, path, dry_run=True)
+        except BtrbkError as e:
+            self.show_error(str(e))
+            return
+        dialog = Gtk.MessageDialog(self.window, 0, Gtk.MessageType.QUESTION, Gtk.ButtonsType.OK_CANCEL,
+                                   "Restore %s from snapshot %s?" % (path, self.snapshot_begin))
+        dialog.format_secondary_text(plan.strip() + "\n\nThe current version will be overwritten.")
+        response = dialog.run()
+        dialog.destroy()
+        if response != Gtk.ResponseType.OK:
+            return
+        try:
+            backend.RestoreFile(self.config, self.snapshot_begin, path)
+            self.statusbar.push(2, "Restored %s" % path)
+        except BtrbkError as e:
+            self.show_error(str(e))
 
     def add_path_to_tree(self, path, status, tree):
         is_dir = os.path.isdir(self.beginpath + path) or os.path.isdir(self.endpath + path)
@@ -139,9 +174,7 @@ class changesWindow(object):
                 return False
 
     def on_idle_init_paths_tree(self):
-        snapper.CreateComparison(self.config, self.snapshot_begin, self.snapshot_end)
-
-        dbus_array = snapper.GetFiles(self.config, self.snapshot_begin, self.snapshot_end)
+        dbus_array = context.backend.GetFiles(self.config, self.snapshot_begin, self.snapshot_end)
 
         # create structure to sort paths into tree
         files_tree = changesWindow.TreeNode("/", {}, 0, True)
@@ -155,14 +188,12 @@ class changesWindow(object):
         # display in statusbar how many files have changed
         self.statusbar.push(1, "%d files" % len(dbus_array))
 
-        snapper.DeleteComparison(self.config, self.snapshot_begin, self.snapshot_end)
-
         # we dont want this function to be called anymore
         return False
 
     def get_lines_from_file(self, path):
         try:
-            return open(path, 'U').readlines()
+            return open(path).readlines()
         except IsADirectoryError:
             pass
         except FileNotFoundError:
@@ -176,6 +207,11 @@ class changesWindow(object):
 
     def _on_pathstree_selection_changed(self, selection):
         (model, treeiter) = selection.get_selected()
+        if hasattr(self, "restore_button"):
+            can_restore = (treeiter is not None and bool(model[treeiter][2]) and
+                           self.snapshot_begin != CURRENT and
+                           os.path.lexists(self.beginpath + model[treeiter][2]))
+            self.restore_button.set_sensitive(can_restore)
         if treeiter is not None and model[treeiter] != "":
             # append file path to snapshot mountpoint
             fromfile = self.beginpath + model[treeiter][2]

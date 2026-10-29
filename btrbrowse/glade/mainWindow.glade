@@ -44,7 +44,7 @@ for filesystem snapshot management</property>
       <object class="GtkAction" id="create-snapshot">
         <property name="label" translatable="yes">Create Snapshot</property>
         <property name="short_label" translatable="yes">New</property>
-        <property name="tooltip" translatable="yes">Create a new snapshot for the current configuration</property>
+        <property name="tooltip" translatable="yes">Run btrbk snapshot for the current subvolume</property>
         <property name="stock_id">gtk-add</property>
         <signal name="activate" handler="on_create_snapshot" swapped="no"/>
       </object>
@@ -119,14 +119,6 @@ for filesystem snapshot management</property>
                         <property name="can_focus">False</property>
                         <property name="label" translatable="yes">Create Snapshot</property>
                         <property name="use_underline">True</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkMenuItem" id="menuitem24">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">Create Configuration</property>
-                        <signal name="activate" handler="on_create_config" swapped="no"/>
                       </object>
                     </child>
                   </object>
@@ -267,7 +259,7 @@ for filesystem snapshot management</property>
                   <object class="GtkLabel" id="label1">
                     <property name="visible">True</property>
                     <property name="can_focus">False</property>
-                    <property name="label" translatable="yes">Userdata</property>
+                    <property name="label" translatable="yes">Details</property>
                   </object>
                 </child>
               </object>
@@ -302,7 +294,7 @@ for filesystem snapshot management</property>
       <object class="GtkHeaderBar" id="headerbar1">
         <property name="visible">True</property>
         <property name="can_focus">False</property>
-        <property name="title">SnapperGUI</property>
+        <property name="title">btrbrowse</property>
         <property name="show_close_button">True</property>
         <child>
           <object class="GtkStackSwitcher" id="stackswitcher1">

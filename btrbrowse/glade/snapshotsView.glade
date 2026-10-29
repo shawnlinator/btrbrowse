@@ -61,14 +61,12 @@
         <child>
           <object class="GtkTreeViewColumn" id="treeviewcolumn4">
             <property name="resizable">True</property>
-            <property name="title" translatable="yes">Description</property>
+            <property name="title" translatable="yes">Snapshot</property>
             <property name="expand">True</property>
             <property name="clickable">True</property>
             <property name="sort_column_id">5</property>
             <child>
               <object class="GtkCellRendererText" id="cellrenderertext4">
-                <property name="editable">True</property>
-                <signal name="edited" handler="on_description_edited" swapped="no"/>
               </object>
               <attributes>
                 <attribute name="text">5</attribute>
@@ -79,13 +77,11 @@
         <child>
           <object class="GtkTreeViewColumn" id="treeviewcolumn5">
             <property name="resizable">True</property>
-            <property name="title" translatable="yes">Cleanup</property>
+            <property name="title" translatable="yes">Backup</property>
             <property name="clickable">True</property>
             <property name="sort_column_id">6</property>
             <child>
               <object class="GtkCellRendererText" id="cellrenderertext5">
-                <property name="editable">True</property>
-                <signal name="edited" handler="on_cleanup_edited" swapped="no"/>
               </object>
               <attributes>
                 <attribute name="text">6</attribute>
