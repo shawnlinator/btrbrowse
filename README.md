@@ -89,6 +89,26 @@ devices:
     BTRBROWSE_ELEVATE="sudo -n" BTRBROWSE_IT_CONFIG=/etc/btrbk/bb-test.conf \
       BTRBROWSE_IT_SOURCE=/mnt/bb-src/data python3 -m unittest discover -s tests -v
 
+Remote hosts (VirtioFS and similar)
+-----------------------------------
+
+If the disk reaches this machine through VirtioFS or another share, btrfs and btrbk cannot run
+here. Install `btrbrowse-helper` on the host that owns the filesystem (a single root-owned file in
+`/usr/libexec`), then choose **Connect to remote host...** in the app menu. It asks for the
+`user@host`, the ssh key (an ssh-agent key, a key file, or ssh's default), the mapping between this
+machine's path and the host's path (`local=remote`) and the btrbk config on the host.
+
+Nothing about the remote is stored, set by flag or read from the environment: you are asked on every
+connection. One ssh connection is kept open for reuse and closed after 5 idle minutes, after which
+the next action asks again. Passphrase and host-key questions appear as dialogs.
+
+Comparison always prefers the btrfs send stream. Without a remote it falls back to a directory
+walk and says so in the status bar (the walk is slow, especially on network shares). With a remote
+there is no fallback: the error is shown instead.
+
+Benchmark: `python3 -m btrbrowse.bench <snapshot_dir> [--pair A B] [--repeats N] [--walk-budget S]
+[--host-walk]` compares the stream with the walk, prompting for the remote on the terminal.
+
 Credits and license
 -------------------
 

@@ -9,6 +9,7 @@ import argparse
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -40,18 +41,23 @@ def trusted_file(path):
         cur = parent
 
 
-def run(cmd, check=True):
+def run(cmd, check=True, ok=(0,)):
     env = {"PATH": SAFE_PATH, "LC_ALL": "C", "LANG": "C"}
     proc = subprocess.run(cmd, env=env, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, universal_newlines=True)
-    if check and proc.returncode != 0:
+    if check and proc.returncode not in ok:
         raise HelperError("%s failed (%d): %s" % (cmd[0], proc.returncode,
                                                   proc.stderr.strip()))
     return proc
 
 
 def btrbk(config, *args):
-    return run(["btrbk", "-c", config] + list(args)).stdout
+    """Run btrbk; exit code 10 means some sections were skipped (e.g. an unmounted
+    volume) while the rest worked, so keep the output and pass the warnings on."""
+    proc = run(["btrbk", "-c", config] + list(args), ok=(0, 10))
+    if proc.returncode == 10 and proc.stderr.strip():
+        sys.stderr.write(proc.stderr)
+    return proc.stdout
 
 
 def parse_raw(text):
@@ -170,6 +176,15 @@ def sweep_stale_temp(directory):
             run(["btrfs", "subvolume", "delete", "--", path], check=False)
 
 
+def stream_ok(send_rc, send_err, recv_rc, recv_err):
+    """`btrfs receive --dump` exits (successfully) at the end-of-stream marker without
+    draining what `btrfs send` still writes, so on large streams send dies from SIGPIPE.
+    That is fine as long as receive succeeded and send reported no error of its own."""
+    if recv_rc != 0 or recv_err.strip():
+        return False
+    return send_rc == 0 or (send_rc == -signal.SIGPIPE and not send_err.strip())
+
+
 def cmd_stream_diff(args):
     """Print the `btrfs receive --dump` of the --no-data incremental stream between two snapshots.
 
@@ -200,7 +215,7 @@ def cmd_stream_diff(args):
         out, err = recv.communicate()
         send_err = send.stderr.read().decode(errors="replace")
         send.wait()
-        if send.returncode != 0 or recv.returncode != 0:
+        if not stream_ok(send.returncode, send_err, recv.returncode, err):
             raise HelperError("btrfs send/receive failed: %s" % (send_err.strip() or err.strip()))
         sys.stdout.write(out)
     finally:

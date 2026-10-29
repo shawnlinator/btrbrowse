@@ -225,7 +225,11 @@ class changesWindow(object):
         if self.loaded:
             return False
         self.loaded = True
-        comparison = context.backend.Compare(self.config, self.snapshot_begin, self.snapshot_end)
+        try:
+            comparison = context.backend.Compare(self.config, self.snapshot_begin, self.snapshot_end)
+        except BtrbkError as e:
+            self.statusbar.push(1, "Comparison failed: %s" % e)
+            return False
         dbus_array = comparison.changes
         self.details = comparison.details
         self.statuses = dict(dbus_array)

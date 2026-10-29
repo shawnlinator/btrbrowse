@@ -1,4 +1,3 @@
-import filecmp
 import os
 import stat
 
@@ -44,14 +43,27 @@ def _entries(path):
         return set()
 
 
-def _compare_entry(a, b, st_a, st_b):
+def _same_content(a, b, abort=None, chunk=1 << 20):
+    """Byte comparison that polls abort between chunks (large files over a network share)."""
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        while True:
+            if abort is not None and abort():
+                raise WalkAborted(-1)
+            block_a, block_b = fa.read(chunk), fb.read(chunk)
+            if block_a != block_b:
+                return False
+            if not block_a:
+                return True
+
+
+def _compare_entry(a, b, st_a, st_b, abort=None):
     status = 0
     if stat.S_IFMT(st_a.st_mode) != stat.S_IFMT(st_b.st_mode):
         return StatusFlags.TYPE
     if stat.S_ISREG(st_a.st_mode):
         if st_a.st_size != st_b.st_size or st_a.st_mtime_ns != st_b.st_mtime_ns:
             try:
-                if not filecmp.cmp(a, b, shallow=False):
+                if not _same_content(a, b, abort):
                     status |= StatusFlags.CONTENT
             except OSError:
                 status |= StatusFlags.CONTENT
@@ -83,19 +95,36 @@ def _add_tree(root, rel, flag, out):
             _add_tree(root, rel + "/" + name, flag, out)
 
 
-def compare_trees(begin, end):
+class WalkAborted(Exception):
+    def __init__(self, visited):
+        Exception.__init__(self, "aborted after %d entries" % visited)
+        self.visited = visited
+
+
+def compare_trees(begin, end, skip=(), abort=None):
     """Compare two directory trees, return [(path relative to the roots, status)].
 
     btrfs snapshots are plain directories, so this works unprivileged as long as
     the files are readable. Unlike `btrfs subvolume find-new` it sees deletions.
+    skip lists paths (like "/.btrbk-snapshots") not to descend into; abort is a
+    callable polled per entry and per MiB compared that raises WalkAborted when it returns True.
     """
     changes = []
+    skip = set(skip)
+    visited = [0]
 
     def walk(rel):
+        if abort is not None and abort():
+            raise WalkAborted(visited[0])
         names_a = _entries(begin + rel)
         names_b = _entries(end + rel)
         for name in sorted(names_a | names_b):
             sub = rel + "/" + name
+            if sub in skip:
+                continue
+            if abort is not None and abort():
+                raise WalkAborted(visited[0])
+            visited[0] += 1
             st_a, st_b = _lstat(begin + sub), _lstat(end + sub)
             if st_a is None and st_b is None:
                 continue
@@ -104,7 +133,7 @@ def compare_trees(begin, end):
             elif st_b is None:
                 _add_tree(begin, sub, StatusFlags.DELETED, changes)
             else:
-                status = _compare_entry(begin + sub, end + sub, st_a, st_b)
+                status = _compare_entry(begin + sub, end + sub, st_a, st_b, abort)
                 if status:
                     changes.append((sub, status))
                 if (stat.S_ISDIR(st_a.st_mode) and stat.S_ISDIR(st_b.st_mode)):

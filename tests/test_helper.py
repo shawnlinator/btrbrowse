@@ -66,3 +66,25 @@ class MountpointTest(unittest.TestCase):
         self.assertTrue(helper.is_mountpoint("/"))
         with tempfile.TemporaryDirectory() as d:
             self.assertFalse(helper.is_mountpoint(d))
+
+
+class StreamOkTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.helper = load_helper()
+
+    def test_clean(self):
+        self.assertTrue(self.helper.stream_ok(0, "", 0, ""))
+
+    def test_sigpipe_after_complete_dump_is_fine(self):
+        self.assertTrue(self.helper.stream_ok(-13, "", 0, ""))
+
+    def test_sigpipe_with_send_error_is_not(self):
+        self.assertFalse(self.helper.stream_ok(-13, "ERROR: cannot read", 0, ""))
+
+    def test_receive_failure_is_not(self):
+        self.assertFalse(self.helper.stream_ok(0, "", 1, "ERROR: unknown command"))
+        self.assertFalse(self.helper.stream_ok(-13, "", 0, "ERROR: truncated"))
+
+    def test_send_failure_is_not(self):
+        self.assertFalse(self.helper.stream_ok(1, "ERROR: parent not readonly", 0, ""))

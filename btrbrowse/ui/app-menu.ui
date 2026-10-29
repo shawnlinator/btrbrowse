@@ -2,6 +2,16 @@
   <menu id="app-menu">
     <section>
       <item>
+        <attribute name="action">app.connect</attribute>
+        <attribute name="label" translatable="yes">Connect to remote host...</attribute>
+      </item>
+      <item>
+        <attribute name="action">app.disconnect</attribute>
+        <attribute name="label" translatable="yes">Disconnect (use this machine)</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
         <attribute name="action">app.about</attribute>
         <attribute name="label" translatable="yes">_About</attribute>
       </item>

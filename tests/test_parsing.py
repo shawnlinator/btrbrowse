@@ -136,3 +136,51 @@ class CompareTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WalkAbortTest(unittest.TestCase):
+    def _tree(self, tmp, files):
+        a, b = os.path.join(tmp, "a"), os.path.join(tmp, "b")
+        os.makedirs(a)
+        os.makedirs(b)
+        for root, mtime in ((a, 1000), (b, 2000)):
+            for name, size in files:
+                path = os.path.join(root, name)
+                with open(path, "wb") as f:
+                    f.write(b"0" * size)
+                os.utime(path, (mtime, mtime))
+        return a, b
+
+    def test_abort_stops_between_entries(self):
+        from btrbrowse.compare import WalkAborted
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._tree(tmp, [("f%d" % i, 1) for i in range(5)])
+            calls = []
+
+            def abort():
+                calls.append(1)
+                return len(calls) > 2
+            with self.assertRaises(WalkAborted):
+                compare_trees(a, b, abort=abort)
+
+    def test_abort_interrupts_a_large_file_compare(self):
+        from btrbrowse.compare import WalkAborted
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._tree(tmp, [("big", 3 << 20)])
+            calls = []
+
+            def abort():
+                calls.append(1)
+                return len(calls) > 3  # past the walk's own polls, trips inside the compare
+            with self.assertRaises(WalkAborted):
+                compare_trees(a, b, abort=abort)
+
+    def test_skip_paths_are_not_entered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = os.path.join(tmp, "a"), os.path.join(tmp, "b")
+            os.makedirs(a + "/.snaps")
+            os.makedirs(b + "/.snaps")
+            with open(b + "/.snaps/new", "w") as f:
+                f.write("x")
+            self.assertTrue(compare_trees(a, b))
+            self.assertEqual(compare_trees(a, b, skip=("/.snaps",)), [])

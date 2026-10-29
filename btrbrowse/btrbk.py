@@ -11,6 +11,7 @@ import subprocess
 import time
 
 from btrbrowse.compare import StatusFlags, compare_trees
+from btrbrowse.remote import RemoteError
 from btrbrowse.stream import fold
 
 DEFAULT_CONFIG = "/etc/btrbk/btrbk.conf"
@@ -93,19 +94,45 @@ def parse_transaction_log(text):
     return events
 
 
+def fold_stream(text, beginpath, endpath):
+    """Fold a `btrfs receive --dump` text into ([(path, status)], {path: [details]}).
+
+    Directories whose only change is their mtime are dropped: it changes whenever an
+    entry inside is created or removed.
+    """
+    changes = fold(text)
+    result, details = [], {}
+    for path in sorted(changes):
+        ch = changes[path]
+        if ch.status == StatusFlags.MTIME and (os.path.isdir(endpath + path)
+                                               or os.path.isdir(beginpath + path)):
+            continue
+        result.append((path, ch.status))
+        details[path] = ch.details
+    return result, details
+
+
 class Backend(object):
-    def __init__(self, config=None, helper=None):
+    def __init__(self, config=None, helper=None, remote=None):
         self.config = config or os.environ.get("BTRBROWSE_CONFIG", DEFAULT_CONFIG)
         self.helper = helper or os.environ.get("BTRBROWSE_HELPER", DEFAULT_HELPER)
+        self.remote = remote
         self._cache = {}
 
     def invalidate(self):
         self._cache.clear()
 
     def _call(self, *args):
-        cmd = [self.helper, "--config", self.config] + list(args)
-        if os.geteuid() != 0:
-            cmd[:0] = os.environ.get("BTRBROWSE_ELEVATE", "pkexec").split()
+        if self.remote:
+            try:
+                self.remote.ensure()
+            except RemoteError as e:
+                raise BtrbkError(str(e))
+            cmd = self.remote.argv(*args)
+        else:
+            cmd = [self.helper, "--config", self.config] + list(args)
+            if os.geteuid() != 0:
+                cmd[:0] = os.environ.get("BTRBROWSE_ELEVATE", "pkexec").split()
         try:
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   universal_newlines=True)
@@ -113,7 +140,7 @@ class Backend(object):
             raise BtrbkError("cannot run %s: %s" % (cmd[0], e))
         if proc.returncode != 0:
             raise BtrbkError(proc.stderr.strip() or "helper exited with %d" % proc.returncode)
-        return proc.stdout
+        return self.remote.to_guest(proc.stdout) if self.remote else proc.stdout
 
     def _load(self):
         """Fetch everything with one helper call (one polkit elevation)."""
@@ -221,22 +248,20 @@ class Backend(object):
                 args = ["stream-diff", "--live", first]
             else:
                 args = ["stream-diff", first, self.GetMountPoint(config, end)]
-            changes = fold(self._call(*args))
+            text = self._call(*args)
         except BtrbkError as e:
-            changes = None
+            text = None
             note = str(e)
-        if changes is None:
+        if text is None:
+            if self.remote:
+                # A walk over a network share can take hours; report the real error instead.
+                raise BtrbkError("stream comparison failed and a directory walk over a remote "
+                                 "share is not attempted: " + note)
             walked = self.GetFiles(config, begin, end)
-            return Comparison(walked, {}, Comparison.WALK, "stream comparison unavailable: " + note)
-        beginpath, endpath = self.GetMountPoint(config, begin), self.GetMountPoint(config, end)
-        result, details = [], {}
-        for path in sorted(changes):
-            ch = changes[path]
-            if ch.status == StatusFlags.MTIME and (os.path.isdir(endpath + path)
-                                                   or os.path.isdir(beginpath + path)):
-                continue  # a directory's mtime changes whenever its entries do
-            result.append((path, ch.status))
-            details[path] = ch.details
+            return Comparison(walked, {}, Comparison.WALK, "stream comparison unavailable: %s; the directory walk can be very slow, "
+                              "especially on network shares" % note)
+        result, details = fold_stream(text, self.GetMountPoint(config, begin),
+                                      self.GetMountPoint(config, end))
         return Comparison(result, details, Comparison.STREAM)
 
     def CreateSingleSnapshot(self, config):
