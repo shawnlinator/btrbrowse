@@ -69,6 +69,8 @@ class BtrbrowseGUI():
             self.stack.add_titled(self.configView[name].scrolledwindow, name, name)
             self.configView[name].selection.connect("changed",
                                                     self.on_snapshots_selection_changed)
+        if context.backend.remote and configs:
+            GLib.idle_add(self.check_remote_paths)
         self.backupsView = backupsView()
         try:
             self.backupsView.update_view()
@@ -96,6 +98,19 @@ class BtrbrowseGUI():
             self.statusbar.push(1, "Snapshots changed on disk, reloading")
             self.load()
         return True
+
+    def check_remote_paths(self):
+        """Snapshots are read from disk here, so the host's paths must exist on this machine."""
+        dirs = context.backend.snapshot_dirs()
+        missing = [d for d in dirs if not os.path.isdir(d)]
+        if missing:
+            self.show_error(
+                "The host's snapshot directory is not visible on this machine:\n\n%s\n\n"
+                "Browsing, comparing in meld and restoring need the files here. Reconnect and set "
+                "the path map (this machine's mount = the host's path, for example "
+                "/mnt/share=/srv/share), or mount the same filesystem at the host's path."
+                % "\n".join(missing))
+        return False
 
     def on_connect(self, *args):
         self.window.get_application().activate_action("connect", None)
