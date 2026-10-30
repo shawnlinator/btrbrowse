@@ -125,3 +125,16 @@ class FoldEdgeCasesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrphanTest(unittest.TestCase):
+    def test_deleted_directory_parked_under_a_temp_name(self):
+        from btrbrowse.stream import fold
+        dump = ("snapshot        ./nasdata4.1 uuid=a transid=1 parent_uuid=b parent_transid=1\n"
+                "rename          ./old/dir dest=./o1-2-0\n"
+                "unlink          ./o1-2-0/file\n"
+                "rmdir           ./o1-2-0\n"
+                "end\n")
+        changes = fold(dump)
+        self.assertEqual(sorted(changes), ["/old/dir", "/old/dir/file"])
+        self.assertTrue(all(c.status == 2 for c in changes.values()))

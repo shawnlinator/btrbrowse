@@ -81,6 +81,13 @@ def fold(text):
     root, ops = parse_dump(text)
     changes = {}
     link_origin = {}  # existing path -> paths hard-linked from it in this stream
+    orphans = {}  # temp name an existing directory was parked under -> its real path
+
+    def resolve(path):
+        for temp, real in orphans.items():
+            if path == temp or path.startswith(temp + "/"):
+                return real + path[len(temp):]
+        return path
 
     def rel(path):
         if root and (path == root or path.startswith(root + "/")):
@@ -124,7 +131,7 @@ def fold(text):
         op, rest = entry["op"], entry["rest"]
         if op in ("snapshot", "subvol", "end"):
             continue
-        path = rel(entry["path"])
+        path = resolve(rel(entry["path"]))
         if op in ("mkfile", "mkdir", "mkfifo", "mknod", "mksock"):
             kinds = {"mkfile": "file", "mkdir": "directory", "mkfifo": "fifo",
                      "mknod": "device node", "mksock": "socket"}
@@ -149,6 +156,9 @@ def fold(text):
         elif op == "rename":
             dst = rel(_dest(rest) or "")
             src_ch = changes.get(path)
+            if _TEMP.search(dst) and (src_ch is None or not src_ch.created):
+                orphans[dst] = path  # parked for removal: what follows happens to the real path
+                continue
             if src_ch is not None and src_ch.created:
                 move(path, dst)
             else:

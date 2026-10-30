@@ -226,6 +226,7 @@ class changesWindow(object):
         if self.loaded:
             return False
         self.loaded = True
+        self.progress = None
         remote = context.backend.remote
         if remote:
             try:
@@ -233,9 +234,34 @@ class changesWindow(object):
             except RemoteError as e:
                 self.statusbar.push(1, "Comparison failed: %s" % e)
                 return False
-        self.statusbar.push(1, "Comparing... (snapshots far apart can take minutes)")
+        self.start_progress()
         threading.Thread(target=self.compare_in_thread, daemon=True).start()
         return False
+
+    def start_progress(self):
+        """Pulsing bar plus elapsed time: btrfs send cannot tell its total size in advance."""
+        self.progress = Gtk.ProgressBar(valign=Gtk.Align.CENTER)
+        self.progress.set_size_request(160, -1)
+        self.statusbar.pack_end(self.progress, False, False, 6)
+        self.progress.show()
+        self.progress_start = time.monotonic()
+
+        def tick():
+            if self.progress is None:
+                return False
+            self.progress.pulse()
+            self.statusbar.pop(3)
+            self.statusbar.push(3, "Comparing... %ds (snapshots far apart can take minutes)"
+                                % (time.monotonic() - self.progress_start))
+            return True
+        tick()
+        GLib.timeout_add(150, tick)
+
+    def stop_progress(self):
+        if self.progress is not None:
+            Gtk.Container.remove(self.statusbar, self.progress)
+            self.progress = None
+            self.statusbar.pop(3)
 
     def compare_in_thread(self):
         try:
@@ -245,6 +271,7 @@ class changesWindow(object):
         GLib.idle_add(self.show_comparison, *result)
 
     def show_comparison(self, comparison, error):
+        self.stop_progress()
         if error is not None:
             self.statusbar.push(1, "Comparison failed: %s" % error)
             return False
