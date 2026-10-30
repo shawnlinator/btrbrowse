@@ -1,9 +1,14 @@
+import logging
+
 from btrbrowse import context
 from btrbrowse.btrbk import BtrbkError, CURRENT
 from btrbrowse.compare import StatusFlags
 from btrbrowse.remote import RemoteError
 import os, pwd, stat, threading, subprocess, time, difflib, collections
 from gi.repository import Gtk, GtkSource, GObject, Gdk, GLib
+
+
+log = logging.getLogger(__name__)
 
 
 class changesWindow(object):
@@ -331,19 +336,37 @@ class changesWindow(object):
         # we dont want this function to be called anymore
         return False
 
+    MAX_VIEW_BYTES = 2 * 1024 * 1024
+
     def get_lines_from_file(self, path):
+        """The file's lines, "" if it does not exist, None if it cannot be shown as text
+        (directory, binary, too large or unreadable); self.skip_reason says why."""
+        self.skip_reason = ""
         try:
-            return open(path).readlines()
+            with open(path, "rb") as f:
+                head = f.read(8192)
+                if b"\0" in head:
+                    self.skip_reason = "binary file"
+                    return None
+                if os.fstat(f.fileno()).st_size > self.MAX_VIEW_BYTES:
+                    self.skip_reason = "file larger than %d MB, use Open in meld" % (self.MAX_VIEW_BYTES >> 20)
+                    return None
+                data = head + f.read()
+            return data.decode("utf-8").splitlines(True)
         except IsADirectoryError:
             pass
         except FileNotFoundError:
             return ""
         except UnicodeDecodeError:
-            pass
+            self.skip_reason = "not UTF-8 text"
         except PermissionError:
-            print("PermissionError")
-            pass  # TODO maybe display a dialog with the error?
+            self.skip_reason = "permission denied"
+            log.warning("cannot read %s: permission denied", path)
         return None
+
+    def show_skipped(self):
+        if self.skip_reason:
+            self.sourcebuffer.set_text("(not shown: %s)" % self.skip_reason)
 
     def _on_pathstree_selection_changed(self, selection):
         (model, treeiter) = selection.get_selected()
@@ -361,8 +384,10 @@ class changesWindow(object):
 
             fromlines = self.get_lines_from_file(fromfile)
             if fromlines is None:
+                self.show_skipped()
                 return
             elif fromlines == "":
+                fromlines = []
                 fromfile = "New File"
                 fromdate = ""
             else:
@@ -370,14 +395,16 @@ class changesWindow(object):
 
             tolines = self.get_lines_from_file(tofile)
             if tolines is None:
+                self.show_skipped()
                 return
             elif tolines == "":
+                tolines = []
                 tofile = "Deleted File"
                 todate = ""
             else:
                 todate = time.ctime(os.stat(tofile).st_mtime)
 
-            languagemanager = GtkSource.LanguageManager()
+            languagemanager = GtkSource.LanguageManager.get_default()  # one shared instance
             currentview = self.choicesviewgroup.get_action("end").get_current_value()
 
             if currentview == 0:  # show file from begin snapshot

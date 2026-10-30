@@ -112,6 +112,14 @@ there is no fallback: the error is shown instead.
 Benchmark: `python3 -m btrbrowse.bench <snapshot_dir> [--pair A B] [--repeats N] [--walk-budget S]
 [--host-walk]` compares the stream with the walk, prompting for the remote on the terminal.
 
+Logging
+-------
+
+The app logs to `~/.local/state/btrbrowse/btrbrowse.log` (rotated, 1 MB x 4): start-up, connections
+(never keys), every helper call with its duration, uncaught errors with tracebacks (also from worker
+threads), GTK/GLib warnings and the open file descriptor count. `btrbrowse.log.fault` receives a
+traceback if the process crashes natively. Set `BTRBROWSE_LOG=debug` for more detail.
+
 Credits and license
 -------------------
 

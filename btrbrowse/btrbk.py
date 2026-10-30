@@ -4,6 +4,7 @@ Reads and writes that need root go through the btrbrowse-helper (pkexec), the
 snapshot contents themselves are read directly from disk.
 """
 import calendar
+import logging
 import datetime
 import os
 import re
@@ -14,6 +15,8 @@ import time
 from btrbrowse.compare import StatusFlags, compare_trees
 from btrbrowse.remote import RemoteError
 from btrbrowse.stream import fold_with_dirs
+
+log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = "/etc/btrbk/btrbk.conf"
 DEFAULT_HELPER = "/usr/libexec/btrbrowse-helper"
@@ -158,11 +161,16 @@ class Backend(object):
             cmd = [self.helper, "--config", self.config] + list(args)
             if os.geteuid() != 0:
                 cmd[:0] = os.environ.get("BTRBROWSE_ELEVATE", "pkexec").split()
+        started = time.monotonic()
         try:
             out, err, rc = self._run(cmd, progress)
         except OSError as e:
+            log.error("cannot run %s: %s", cmd[0], e)
             raise BtrbkError("cannot run %s: %s" % (cmd[0], e))
+        log.info("helper %s: rc %d, %d bytes, %.1fs", args[0] if args else "?", rc, len(out),
+                 time.monotonic() - started)
         if rc != 0:
+            log.error("helper %s failed: %s", args[0] if args else "?", err.strip()[:500])
             raise BtrbkError(err.strip() or "helper exited with %d" % rc)
         return self.remote.to_guest(out) if self.remote else out
 

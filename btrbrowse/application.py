@@ -1,18 +1,20 @@
-import os, sys, signal, argparse
+import logging, os, sys, signal, argparse
 from gi.repository import Gtk, GLib, Gio
-from btrbrowse import context, lastsession
+from btrbrowse import context, lastsession, log
 from btrbrowse.mainWindow import BtrbrowseGUI
 from btrbrowse.prompts import gtk_prompt, make_askpass_script
 from btrbrowse.remote import Cancelled, Remote, RemoteError
 
 
 def start_ui():
+    log.setup()
     parser = argparse.ArgumentParser(description="Browse and compare btrbk snapshots")
     parser.add_argument("-c", "--config", help="btrbk configuration file (default /etc/btrbk/btrbk.conf)")
     args, rest = parser.parse_known_args()
     context.init(args.config)
     app = Application()
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+    log.watch_fds()
     exit_status = app.run([sys.argv[0]] + rest)
     sys.exit(exit_status)
 
@@ -51,6 +53,7 @@ class Application(Gtk.Application):
         """Use a remote host's btrbk (e.g. a VM's hypervisor); asks for every detail."""
         self.disconnect_remote()
         backend = context.backend
+        logging.getLogger(__name__).info("connecting to a remote host")
         remote = Remote(gtk_prompt(self.btrbrowse.window), askpass=make_askpass_script(),
                         remember=lastsession.save)
         try:
