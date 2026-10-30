@@ -1,6 +1,6 @@
 import os, sys, signal, argparse
 from gi.repository import Gtk, GLib, Gio
-from btrbrowse import context
+from btrbrowse import context, lastsession
 from btrbrowse.mainWindow import BtrbrowseGUI
 from btrbrowse.prompts import gtk_prompt, make_askpass_script
 from btrbrowse.remote import Cancelled, Remote, RemoteError
@@ -51,7 +51,8 @@ class Application(Gtk.Application):
         """Use a remote host's btrbk (e.g. a VM's hypervisor); asks for every detail."""
         self.disconnect_remote()
         backend = context.backend
-        remote = Remote(gtk_prompt(self.btrbrowse.window), askpass=make_askpass_script())
+        remote = Remote(gtk_prompt(self.btrbrowse.window), askpass=make_askpass_script(),
+                        remember=lastsession.save)
         try:
             remote.ensure()  # asks for the host and key now, so cancelling leaves us local
         except RemoteError as e:

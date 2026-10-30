@@ -1,8 +1,10 @@
 import io
+import os
+import tempfile
 import unittest
 from unittest import mock
 
-from btrbrowse import prompts
+from btrbrowse import lastsession, prompts
 from btrbrowse.btrbk import Backend, BtrbkError
 from btrbrowse.remote import (Cancelled, ConnectionRequest, KEY_AGENT, KEY_DEFAULT, KEY_FILE,
                               Remote, RemoteError, parse_path_map)
@@ -65,7 +67,18 @@ class TranslationTest(unittest.TestCase):
         self.assertIn("--config /srv/other.conf", make_remote(config="/srv/other.conf").argv("list", "config")[-1])
 
 
-class TtyPromptTest(unittest.TestCase):
+class IsolatedConfig(unittest.TestCase):
+    """Keeps the tests away from the real remembered session."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self._tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class TtyPromptTest(IsolatedConfig):
     def run_prompt(self, answers, previous=None):
         keys = [{"label": "work key", "fingerprint": "SHA256:abc", "public": "ssh-ed25519 AAAA work key"}]
         with mock.patch.object(prompts, "agent_keys", return_value=keys):
@@ -136,3 +149,38 @@ class EnsureTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LastSessionTest(IsolatedConfig):
+    def test_round_trip_and_private_file(self):
+        lastsession.save(ConnectionRequest("a@b.invalid", (KEY_AGENT, "ssh-ed25519 AAAA"), "/x=/y", "/c"))
+        got = lastsession.load()
+        self.assertEqual((got.target, got.key, got.path_map, got.config),
+                         ("a@b.invalid", (KEY_AGENT, "ssh-ed25519 AAAA"), "/x=/y", "/c"))
+        self.assertEqual(os.stat(lastsession.path()).st_mode & 0o777, 0o600)
+
+    def test_missing_or_corrupt_file_gives_none(self):
+        self.assertIsNone(lastsession.load())
+        os.makedirs(os.path.dirname(lastsession.path()))
+        with open(lastsession.path(), "w") as f:
+            f.write("{not json")
+        self.assertIsNone(lastsession.load())
+
+    def test_forget(self):
+        lastsession.save(ConnectionRequest("a@b.invalid"))
+        lastsession.forget()
+        self.assertIsNone(lastsession.load())
+
+    def test_tty_prompt_suggests_the_remembered_session(self):
+        lastsession.save(ConnectionRequest("a@b.invalid", (KEY_FILE, "/k"), "/x=/y", "/c"))
+        out = io.StringIO()
+        request = prompts.tty_prompt(stdin=io.StringIO("\n\n/k\n\n\n"), out=out)
+        self.assertEqual((request.target, request.path_map, request.config),
+                         ("a@b.invalid", "/x=/y", "/c"))
+
+    def test_successful_connection_is_remembered(self):
+        request = ConnectionRequest("a@b.invalid", (KEY_DEFAULT, None), "/x=/y")
+        remote = Remote(prompt=lambda prev=None: request, remember=lastsession.save)
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0, stderr="")):
+            remote.ensure()
+        self.assertEqual(lastsession.load().target, "a@b.invalid")

@@ -98,8 +98,11 @@ here. Install `btrbrowse-helper` on the host that owns the filesystem (a single 
 `user@host`, the ssh key (an ssh-agent key, a key file, or ssh's default), the mapping between this
 machine's path and the host's path (`local=remote`) and the btrbk config on the host.
 
-Nothing about the remote is stored, set by flag or read from the environment: you are asked on every
-connection. One ssh connection is kept open for reuse and closed after 5 idle minutes, after which
+Nothing about the remote is set by flag, environment variable or in the code: you are asked on every
+connection. The last session that actually connected is remembered in
+`~/.config/btrbrowse/last-session.json` (mode 0600) to pre-fill the next prompt: host, which key you
+picked (an agent public key or a key file's path, never private key material), path map and btrbk
+config. The dialog's **Forget saved session** button deletes it. One ssh connection is kept open for reuse and closed after 5 idle minutes, after which
 the next action asks again. Passphrase and host-key questions appear as dialogs.
 
 Comparison always prefers the btrfs send stream. Without a remote it falls back to a directory

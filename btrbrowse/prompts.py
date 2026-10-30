@@ -1,10 +1,11 @@
-"""Ask the user how to connect to the remote host. Nothing is stored between sessions."""
+"""Ask the user how to connect to the remote host, suggesting the last session that connected."""
 import getpass
 import os
 import stat
 import sys
 import tempfile
 
+from btrbrowse import lastsession
 from btrbrowse.remote import (ConnectionRequest, KEY_AGENT, KEY_DEFAULT, KEY_FILE,
                               DEFAULT_CONFIG, agent_keys)
 
@@ -21,9 +22,20 @@ def key_choices():
     return choices
 
 
+def _index_of(choices, key):
+    """Position of a remembered key among the choices (0, ssh's own choice, if it is gone)."""
+    for i, (_, value) in enumerate(choices):
+        if value == key:
+            return i
+    if key and key[0] == KEY_FILE:
+        return len(choices) - 1
+    return 0
+
+
 def tty_prompt(previous=None, stdin=None, out=None):
     """Prompt on the terminal. `previous` (this session only) supplies the suggestions."""
     stdin, out = stdin or sys.stdin, out or sys.stderr
+    previous = previous or lastsession.load()
 
     def ask(question, default=""):
         out.write("%s%s: " % (question, " [%s]" % default if default else ""))
@@ -39,7 +51,7 @@ def tty_prompt(previous=None, stdin=None, out=None):
     choices = key_choices()
     for i, (label, _) in enumerate(choices):
         out.write("  %d) %s\n" % (i, label))
-    picked = ask("SSH key", "0")
+    picked = ask("SSH key", str(_index_of(choices, previous.key if previous else None)))
     try:
         key = choices[int(picked)][1]
     except (TypeError, ValueError, IndexError):
@@ -77,6 +89,7 @@ def gtk_prompt(parent):
     from gi.repository import Gtk
 
     def prompt(previous=None):
+        previous = previous or lastsession.load()
         dialog = Gtk.Dialog(title="Connect to remote host", transient_for=parent, modal=True)
         dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Connect", Gtk.ResponseType.OK)
         dialog.set_default_response(Gtk.ResponseType.OK)
@@ -94,9 +107,12 @@ def gtk_prompt(parent):
         combo = Gtk.ComboBoxText()
         for label, _ in choices:
             combo.append_text(label)
-        combo.set_active(0)
         chooser = Gtk.FileChooserButton(title="Private key file")
-        chooser.set_sensitive(False)
+        remembered = _index_of(choices, previous.key if previous else None)
+        combo.set_active(remembered)
+        if previous and previous.key[0] == KEY_FILE and previous.key[1]:
+            chooser.set_filename(previous.key[1])
+        chooser.set_sensitive(choices[remembered][1][0] == KEY_FILE)
         combo.connect("changed", lambda c: chooser.set_sensitive(choices[c.get_active()][1][0] == KEY_FILE))
         path_map = Gtk.Entry(activates_default=True, placeholder_text="local=remote, e.g. " + PATH_MAP_HINT)
         path_map.set_text(previous.path_map if previous else "")
@@ -107,10 +123,21 @@ def gtk_prompt(parent):
         row(2, "Key file", chooser)
         row(3, "Path map", path_map)
         row(4, "btrbk config", config)
-        note = Gtk.Label(label="Nothing here is saved. You will be asked again for each new connection.",
-                         xalign=0)
+        note = Gtk.Label(label="The last session that connected is remembered here (host, key choice, "
+                               "paths; never a private key). You are still asked for each connection.",
+                         xalign=0, wrap=True, max_width_chars=48)
         note.get_style_context().add_class("dim-label")
         grid.attach(note, 0, 5, 2, 1)
+
+        def forget(_button):
+            lastsession.forget()
+            for entry in (target, path_map, config):
+                entry.set_text("")
+            combo.set_active(0)
+        forget_button = Gtk.Button(label="Forget saved session", halign=Gtk.Align.START)
+        forget_button.set_sensitive(previous is not None)
+        forget_button.connect("clicked", forget)
+        grid.attach(forget_button, 0, 6, 2, 1)
         dialog.show_all()
         response = dialog.run()
         request = None

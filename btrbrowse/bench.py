@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-from btrbrowse import compare
+from btrbrowse import compare, lastsession
 from btrbrowse.btrbk import Backend, fold_stream, parse_timestamp
 from btrbrowse.compare import StatusFlags, WalkAborted, compare_trees
 from btrbrowse.prompts import tty_prompt
@@ -129,7 +129,7 @@ def main(argv=None):
     parser.add_argument("--no-walk", action="store_true", help="only time the stream method")
     args = parser.parse_args(argv)
 
-    remote = Remote(prompt=tty_prompt)
+    remote = Remote(prompt=tty_prompt, remember=lastsession.save)
     remote.ensure()  # asks for host, key and path map
     try:
         run_pairs(args, remote)

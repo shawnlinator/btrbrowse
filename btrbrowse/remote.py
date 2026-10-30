@@ -84,11 +84,12 @@ def agent_keys():
 
 
 class Remote(object):
-    def __init__(self, prompt=None, request=None, helper=None, askpass=None):
+    def __init__(self, prompt=None, request=None, helper=None, askpass=None, remember=None):
         self.prompt = prompt
         self.request = request
         self.helper = helper or DEFAULT_HELPER
         self.askpass = askpass  # None: ssh asks on the terminal; else a script path for GUI prompts
+        self.remember = remember  # called with the ConnectionRequest after a successful connect
         self.path_map = parse_path_map(request.path_map) if request else []
 
     # -- path translation
@@ -157,6 +158,8 @@ class Remote(object):
                 os.unlink(keyfile)
         self.request = request
         self.path_map = parse_path_map(request.path_map)
+        if self.remember:
+            self.remember(request)
 
     def close(self):
         if self.request:
