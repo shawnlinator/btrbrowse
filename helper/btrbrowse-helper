@@ -12,6 +12,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -206,18 +207,31 @@ def cmd_stream_diff(args):
             raise HelperError("snapshots belong to different subvolumes")
     try:
         env = {"PATH": SAFE_PATH, "LC_ALL": "C", "LANG": "C"}
-        send = subprocess.Popen(["btrfs", "send", "-q", "--no-data", "-p", begin, end],
-                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        recv = subprocess.Popen(["btrfs", "receive", "--dump"], env=env, stdin=send.stdout,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                universal_newlines=True, errors="surrogateescape")
-        send.stdout.close()
-        out, err = recv.communicate()
-        send_err = send.stderr.read().decode(errors="replace")
-        send.wait()
-        if not stream_ok(send.returncode, send_err, recv.returncode, err):
-            raise HelperError("btrfs send/receive failed: %s" % (send_err.strip() or err.strip()))
-        sys.stdout.write(out)
+        # stderr goes to temp files so a chatty child can never block on a full pipe while
+        # we are busy forwarding stdout
+        with tempfile.TemporaryFile() as send_err_file, tempfile.TemporaryFile() as recv_err_file:
+            send = subprocess.Popen(["btrfs", "send", "-q", "--no-data", "-p", begin, end],
+                                    env=env, stdout=subprocess.PIPE, stderr=send_err_file)
+            recv = subprocess.Popen(["btrfs", "receive", "--dump"], env=env, stdin=send.stdout,
+                                    stdout=subprocess.PIPE, stderr=recv_err_file)
+            send.stdout.close()
+            # Forward the dump as it is produced so the caller can show progress. A failure is
+            # reported through the exit status; the caller discards what it already received.
+            out = sys.stdout.buffer
+            while True:
+                chunk = recv.stdout.read1(65536)
+                if not chunk:
+                    break
+                out.write(chunk)
+                out.flush()
+            recv.wait()
+            send.wait()
+            send_err_file.seek(0)
+            recv_err_file.seek(0)
+            send_err = send_err_file.read().decode(errors="replace")
+            recv_err = recv_err_file.read().decode(errors="replace")
+        if not stream_ok(send.returncode, send_err, recv.returncode, recv_err):
+            raise HelperError("btrfs send/receive failed: %s" % (send_err.strip() or recv_err.strip()))
     finally:
         if temp:
             run(["btrfs", "subvolume", "delete", "--", temp], check=False)

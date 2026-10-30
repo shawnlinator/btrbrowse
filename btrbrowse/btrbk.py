@@ -8,6 +8,7 @@ import datetime
 import os
 import re
 import subprocess
+import tempfile
 import time
 
 from btrbrowse.compare import StatusFlags, compare_trees
@@ -122,7 +123,11 @@ class Backend(object):
     def invalidate(self):
         self._cache.clear()
 
-    def _call(self, *args):
+    def _call(self, *args, progress=None):
+        """Run a helper verb and return its output.
+
+        progress, if given, is called as progress(bytes, lines) while output arrives.
+        """
         if self.remote:
             try:
                 self.remote.ensure()
@@ -134,13 +139,35 @@ class Backend(object):
             if os.geteuid() != 0:
                 cmd[:0] = os.environ.get("BTRBROWSE_ELEVATE", "pkexec").split()
         try:
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  universal_newlines=True)
+            out, err, rc = self._run(cmd, progress)
         except OSError as e:
             raise BtrbkError("cannot run %s: %s" % (cmd[0], e))
-        if proc.returncode != 0:
-            raise BtrbkError(proc.stderr.strip() or "helper exited with %d" % proc.returncode)
-        return self.remote.to_guest(proc.stdout) if self.remote else proc.stdout
+        if rc != 0:
+            raise BtrbkError(err.strip() or "helper exited with %d" % rc)
+        return self.remote.to_guest(out) if self.remote else out
+
+    @staticmethod
+    def _run(cmd, progress):
+        with tempfile.TemporaryFile() as err_file:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err_file)
+            chunks, size, lines, last = [], 0, 0, 0.0
+            while True:
+                chunk = proc.stdout.read1(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+                lines += chunk.count(b"\n")
+                now = time.monotonic()
+                if progress is not None and now - last >= 0.1:
+                    progress(size, lines)
+                    last = now
+            proc.wait()
+            if progress is not None:
+                progress(size, lines)
+            err_file.seek(0)
+            err = err_file.read().decode(errors="replace")
+        return b"".join(chunks).decode(errors="surrogateescape"), err, proc.returncode
 
     def _load(self):
         """Fetch everything with one helper call (one polkit elevation)."""
@@ -231,13 +258,14 @@ class Backend(object):
     def GetFiles(self, config, begin, end):
         return compare_trees(self.GetMountPoint(config, begin), self.GetMountPoint(config, end))
 
-    def Compare(self, config, begin, end):
+    def Compare(self, config, begin, end, progress=None):
         """Compare two snapshots, preferring the btrfs send stream.
 
         The stream (via the helper) lists every create, delete, rename, write range,
         chmod, chown, xattr and timestamp change, including deletions and renames, without
         reading file data. It needs two read-only subvolumes of the same source, with the
         older one first; anything else, or any failure, falls back to a directory walk.
+        progress(bytes, lines) is called while the stream arrives.
         """
         begin, end = int(begin), int(end)
         try:
@@ -248,7 +276,7 @@ class Backend(object):
                 args = ["stream-diff", "--live", first]
             else:
                 args = ["stream-diff", first, self.GetMountPoint(config, end)]
-            text = self._call(*args)
+            text = self._call(*args, progress=progress)
         except BtrbkError as e:
             text = None
             note = str(e)

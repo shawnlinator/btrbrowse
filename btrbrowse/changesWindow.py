@@ -245,17 +245,33 @@ class changesWindow(object):
         self.statusbar.pack_end(self.progress, False, False, 6)
         self.progress.show()
         self.progress_start = time.monotonic()
+        self.received = (0, 0)
 
         def tick():
             if self.progress is None:
                 return False
             self.progress.pulse()
             self.statusbar.pop(3)
-            self.statusbar.push(3, "Comparing... %ds (snapshots far apart can take minutes)"
-                                % (time.monotonic() - self.progress_start))
+            size, lines = self.received
+            text = "Comparing... %ds" % (time.monotonic() - self.progress_start)
+            if lines:
+                text += ", %s of changes received (%s lines)" % (self.human_size(size), format(lines, ","))
+            else:
+                text += " (waiting for the first changes; far-apart snapshots can take minutes)"
+            self.statusbar.push(3, text)
             return True
         tick()
         GLib.timeout_add(150, tick)
+
+    @staticmethod
+    def human_size(n):
+        for unit in ("B", "KB", "MB", "GB"):
+            if n < 1024 or unit == "GB":
+                return "%d %s" % (n, unit) if unit == "B" else "%.1f %s" % (n, unit)
+            n /= 1024.0
+
+    def set_received(self, size, lines):
+        self.received = (size, lines)  # a plain assignment, safe to make from the worker thread
 
     def stop_progress(self):
         if self.progress is not None:
@@ -265,7 +281,8 @@ class changesWindow(object):
 
     def compare_in_thread(self):
         try:
-            result = context.backend.Compare(self.config, self.snapshot_begin, self.snapshot_end), None
+            result = context.backend.Compare(self.config, self.snapshot_begin, self.snapshot_end,
+                                             progress=self.set_received), None
         except BtrbkError as e:
             result = None, e
         GLib.idle_add(self.show_comparison, *result)
