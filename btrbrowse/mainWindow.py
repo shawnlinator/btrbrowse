@@ -103,7 +103,9 @@ class BtrbrowseGUI():
         """Snapshots are read from disk here, so the host's paths must exist on this machine."""
         dirs = context.backend.snapshot_dirs()
         missing = [d for d in dirs if not os.path.isdir(d)]
-        if missing:
+        if missing and len(missing) < len(dirs):
+            self.statusbar.push(1, "Not visible on this machine (skipped): %s" % ", ".join(missing))
+        elif missing:
             self.show_error(
                 "The host's snapshot directory is not visible on this machine:\n\n%s\n\n"
                 "Browsing, comparing in meld and restoring need the files here. Reconnect and set "
