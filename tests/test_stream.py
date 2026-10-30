@@ -138,3 +138,26 @@ class OrphanTest(unittest.TestCase):
         changes = fold(dump)
         self.assertEqual(sorted(changes), ["/old/dir", "/old/dir/file"])
         self.assertTrue(all(c.status == 2 for c in changes.values()))
+
+
+class DirsTest(unittest.TestCase):
+    DUMP = ("snapshot        ./s.1 uuid=a transid=1 parent_uuid=b parent_transid=1\n"
+            "utimes          ./vault/ab mtime=2026-10-26T00:32:39-0600 atime=x ctime=y\n"
+            "mkfile          ./vault/ab/o5-6-0\n"
+            "rename          ./vault/ab/o5-6-0 dest=./vault/ab/chunk\n"
+            "mkdir           ./newdir\n"
+            "end\n")
+
+    def test_stream_reports_created_dirs(self):
+        from btrbrowse.stream import fold_with_dirs
+        changes, dirs = fold_with_dirs(self.DUMP)
+        self.assertIn("/newdir", dirs)
+        self.assertNotIn("/vault/ab/chunk", dirs)
+
+    def test_parents_are_dirs_even_when_the_share_is_unreadable(self):
+        from btrbrowse.btrbk import fold_stream
+        result, details, dirs = fold_stream(self.DUMP, "/nonexistent/a", "/nonexistent/b")
+        paths = [p for p, _ in result]
+        self.assertIn("/vault/ab/chunk", paths)
+        self.assertNotIn("/vault/ab", paths)  # mtime-only directory, known from its child
+        self.assertTrue({"/vault", "/vault/ab", "/newdir"} <= dirs)

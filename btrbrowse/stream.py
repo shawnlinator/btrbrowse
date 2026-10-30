@@ -17,6 +17,8 @@ _TEMP = re.compile(r"(^|/)o\d+-\d+-\d+$")
 
 def unescape(text):
     """Undo btrfs-progs path escaping (\\ for space and backslash, \\ooo for odd bytes)."""
+    if "\\" not in text:
+        return text  # nothing escaped: nearly every path
     out = bytearray()
     i = 0
     raw = text.encode("utf-8", "surrogateescape")
@@ -78,8 +80,15 @@ def _dest(rest):
 
 def fold(text):
     """Return {path: Change}, paths absolute inside the subvolume ("/dir/file")."""
+    return fold_with_dirs(text)[0]
+
+
+def fold_with_dirs(text):
+    """Like fold, also returning the set of paths the stream itself shows to be directories
+    (created, removed or moved ones). It cannot tell about directories it only touches."""
     root, ops = parse_dump(text)
     changes = {}
+    dirs = set()
     link_origin = {}  # existing path -> paths hard-linked from it in this stream
     orphans = {}  # temp name an existing directory was parked under -> its real path
 
@@ -114,9 +123,10 @@ def fold(text):
 
     def move(src, dst):
         src_ch = changes.pop(src, None)
-        prefix = src + "/"
-        for key in [k for k in changes if k.startswith(prefix)]:
-            changes[dst + key[len(src):]] = changes.pop(key)
+        if src in dirs:  # only a directory has anything below it; scanning for every moved file is O(n^2)
+            prefix = src + "/"
+            for key in [k for k in changes if k.startswith(prefix)]:
+                changes[dst + key[len(src):]] = changes.pop(key)
         if src_ch is None:
             return
         old = changes.get(dst)
@@ -132,6 +142,8 @@ def fold(text):
         if op in ("snapshot", "subvol", "end"):
             continue
         path = resolve(rel(entry["path"]))
+        if op in ("mkdir", "rmdir"):
+            dirs.add(path)
         if op in ("mkfile", "mkdir", "mkfifo", "mknod", "mksock"):
             kinds = {"mkfile": "file", "mkdir": "directory", "mkfifo": "fifo",
                      "mknod": "device node", "mksock": "socket"}
@@ -156,6 +168,8 @@ def fold(text):
         elif op == "rename":
             dst = rel(_dest(rest) or "")
             src_ch = changes.get(path)
+            if path in dirs:
+                dirs.add(dst)
             if _TEMP.search(dst) and (src_ch is None or not src_ch.created):
                 orphans[dst] = path  # parked for removal: what follows happens to the real path
                 continue
@@ -204,4 +218,4 @@ def fold(text):
         if ch.extents:
             ch.details.insert(0, "%d data range%s rewritten (%d bytes)" % (
                 ch.extents, "" if ch.extents == 1 else "s", ch.bytes))
-    return dict((p, c) for p, c in changes.items() if c.status and p != "/")
+    return dict((p, c) for p, c in changes.items() if c.status and p != "/"), dirs

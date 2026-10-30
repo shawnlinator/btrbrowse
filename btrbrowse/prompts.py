@@ -1,4 +1,5 @@
 """Ask the user how to connect to the remote host, suggesting the last session that connected."""
+import atexit
 import getpass
 import os
 import stat
@@ -76,6 +77,7 @@ def make_askpass_script():
         f.write('#!/bin/sh\nPYTHONPATH=%s exec %s -m btrbrowse.askpass "$@"\n'
                 % (_sh_quote(root), _sh_quote(sys.executable)))
     os.chmod(path, stat.S_IRWXU)
+    atexit.register(lambda: os.path.exists(path) and os.unlink(path))
     return path
 
 

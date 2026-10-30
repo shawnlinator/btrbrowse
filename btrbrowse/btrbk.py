@@ -13,7 +13,7 @@ import time
 
 from btrbrowse.compare import StatusFlags, compare_trees
 from btrbrowse.remote import RemoteError
-from btrbrowse.stream import fold
+from btrbrowse.stream import fold_with_dirs
 
 DEFAULT_CONFIG = "/etc/btrbk/btrbk.conf"
 DEFAULT_HELPER = "/usr/libexec/btrbrowse-helper"
@@ -34,8 +34,9 @@ class Comparison(object):
     STREAM = "btrfs send stream"
     WALK = "directory walk"
 
-    def __init__(self, changes, details, method, note=""):
+    def __init__(self, changes, details, method, note="", dirs=None):
         self.changes, self.details, self.method, self.note = changes, details, method, note
+        self.dirs = dirs  # paths known to be directories; None: ask the file system
 
 
 def parse_raw(text):
@@ -95,22 +96,41 @@ def parse_transaction_log(text):
     return events
 
 
-def fold_stream(text, beginpath, endpath):
-    """Fold a `btrfs receive --dump` text into ([(path, status)], {path: [details]}).
+_METADATA_ONLY = (StatusFlags.MTIME | StatusFlags.PERMISSIONS | StatusFlags.OWNER | StatusFlags.GROUP
+                  | StatusFlags.XATTRS | StatusFlags.ACL)
 
-    Directories whose only change is their mtime are dropped: it changes whenever an
-    entry inside is created or removed.
+
+def fold_stream(text, beginpath, endpath):
+    """Fold a `btrfs receive --dump` text into ([(path, status)], {path: [details]}, dirs).
+
+    dirs is the set of paths that are directories. The stream and the changed paths themselves
+    tell (a parent of a changed path is a directory); the share is only consulted for paths
+    with nothing but a metadata change, as the user may not be able to read parts of it.
+    Directories whose only change is their mtime are dropped: it changes whenever an entry
+    inside is created or removed.
     """
-    changes = fold(text)
+    changes, dirs = fold_with_dirs(text)
+    dirs = set(dirs)
+    for path in changes:
+        parent = path.rpartition("/")[0]
+        while parent and parent not in dirs:
+            dirs.add(parent)
+            parent = parent.rpartition("/")[0]
+    for path, ch in changes.items():
+        # An mtime-only leaf is shown as it is; asking the share about tens of thousands of
+        # touched files is slow and only matters for the rare empty directory.
+        metadata_only = ch.status != StatusFlags.MTIME and (ch.status & ~_METADATA_ONLY) == 0
+        if metadata_only and path not in dirs and (os.path.isdir(endpath + path)
+                                                   or os.path.isdir(beginpath + path)):
+            dirs.add(path)
     result, details = [], {}
     for path in sorted(changes):
         ch = changes[path]
-        if ch.status == StatusFlags.MTIME and (os.path.isdir(endpath + path)
-                                               or os.path.isdir(beginpath + path)):
+        if ch.status == StatusFlags.MTIME and path in dirs:
             continue
         result.append((path, ch.status))
         details[path] = ch.details
-    return result, details
+    return result, details, dirs
 
 
 class Backend(object):
@@ -288,9 +308,9 @@ class Backend(object):
             walked = self.GetFiles(config, begin, end)
             return Comparison(walked, {}, Comparison.WALK, "stream comparison unavailable: %s; the directory walk can be very slow, "
                               "especially on network shares" % note)
-        result, details = fold_stream(text, self.GetMountPoint(config, begin),
-                                      self.GetMountPoint(config, end))
-        return Comparison(result, details, Comparison.STREAM)
+        result, details, dirs = fold_stream(text, self.GetMountPoint(config, begin),
+                                            self.GetMountPoint(config, end))
+        return Comparison(result, details, Comparison.STREAM, dirs=dirs)
 
     def CreateSingleSnapshot(self, config):
         out = self._call("snapshot", self._config_row(config)[1])

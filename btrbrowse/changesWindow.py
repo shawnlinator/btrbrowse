@@ -21,6 +21,7 @@ class changesWindow(object):
         self.window = builder.get_object("changesWindow")
         self.statusbar = builder.get_object("statusbar1")
         self.pathstreeview = builder.get_object("pathstreeview")
+        self.pathstreeview.connect("row-expanded", self.on_row_expanded)
         self.fileview = builder.get_object("fileview")
         self.choicesviewgroup = builder.get_object("actiongroup")
         builder.connect_signals(self)
@@ -43,6 +44,7 @@ class changesWindow(object):
         self.details = {}
         self.statuses = {}
         self.loaded = False
+        self.dirs = None
         self.window.show_all()
         GObject.idle_add(self.on_idle_init_paths_tree)
 
@@ -99,7 +101,7 @@ class changesWindow(object):
 
     def selected_path(self):
         model, treeiter = self.pathstreeview.get_selection().get_selected()
-        if treeiter is None or not model[treeiter][2]:
+        if treeiter is None or model[treeiter][2] in ("", self.PLACEHOLDER):
             return None
         return model[treeiter][2]
 
@@ -139,7 +141,10 @@ class changesWindow(object):
             self.show_error(str(e))
 
     def add_path_to_tree(self, path, status, tree):
-        is_dir = os.path.isdir(self.beginpath + path) or os.path.isdir(self.endpath + path)
+        if self.dirs is not None:
+            is_dir = path in self.dirs
+        else:
+            is_dir = os.path.isdir(self.beginpath + path) or os.path.isdir(self.endpath + path)
         parts = path.split('/')
         node = tree
         # Add directories to tree
@@ -185,30 +190,43 @@ class changesWindow(object):
         else:
             return "No changes"
 
+    PLACEHOLDER = "\0loading"
+    COLORS = {"created": Gdk.RGBA(0.0, 0.57, 0.0), "deleted": Gdk.RGBA(0.6, 0.0, 0.0),
+              "modified": Gdk.RGBA(0.49, 0.47, 0.0), "none": Gdk.RGBA(0.0, 0.0, 0.0)}
+
     def get_treestore_from_tree(self, tree):
-        # Row: [gtk-stock-icon, file name, file complete path, entry color, tooltip]
-        treestore = Gtk.TreeStore(str, str, str, Gdk.RGBA, str)
-
-        def get_children(subtree, parent=None):
-            for file_name, child in subtree.children.items():
-                color = Gdk.RGBA(0.0, 0.0, 0.0)
-                if child.status & StatusFlags.CREATED:  # Created file
-                    color = Gdk.RGBA(0.0, 0.57, 0.0)
-                elif child.status & StatusFlags.DELETED:  # Deleted file
-                    color = Gdk.RGBA(0.6, 0.0, 0.0)
-                elif child.status > 0:  # Modified file
-                    color = Gdk.RGBA(0.49, 0.47, 0.0)
-
-                node = treestore.append(parent, [
-                    Gtk.STOCK_DIRECTORY if child.is_dir else Gtk.STOCK_FILE,
-                    file_name, child.path, color, self.file_status_to_string(child.status)
-                ])
-                # if this child is a directory get childs
-                if child.children is not None:
-                    get_children(child, node)
-
-        get_children(tree)
+        """A store with only the top level filled in; a folder's rows are added when it is
+        expanded (see on_row_expanded), so tens of thousands of changes open instantly."""
+        # Row: [icon, file name, file complete path, entry color, tooltip, tree node]
+        treestore = Gtk.TreeStore(str, str, str, Gdk.RGBA, str, object)
+        self.fill_level(treestore, None, tree)
         return treestore
+
+    def fill_level(self, treestore, parent, subtree):
+        status_text = {}
+        for file_name, child in sorted(subtree.children.items()):
+            if child.status & StatusFlags.CREATED:
+                color = self.COLORS["created"]
+            elif child.status & StatusFlags.DELETED:
+                color = self.COLORS["deleted"]
+            elif child.status > 0:
+                color = self.COLORS["modified"]
+            else:
+                color = self.COLORS["none"]
+            if child.status not in status_text:
+                status_text[child.status] = self.file_status_to_string(child.status)
+            node = treestore.append(parent, [
+                Gtk.STOCK_DIRECTORY if child.is_dir else Gtk.STOCK_FILE,
+                file_name, child.path, color, status_text[child.status], child])
+            if child.children:
+                treestore.append(node, ["", "", self.PLACEHOLDER, self.COLORS["none"], "", None])
+
+    def on_row_expanded(self, treeview, treeiter, treepath):
+        store = treeview.get_model()
+        first = store.iter_children(treeiter)
+        if first is not None and store[first][2] == self.PLACEHOLDER:
+            self.fill_level(store, treeiter, store[treeiter][5])
+            store.remove(first)
 
     def on_query_tooltip(self, widget, x, y, keyboard_tip, tooltip):
         if not widget.get_tooltip_context(x, y, keyboard_tip):
@@ -281,28 +299,28 @@ class changesWindow(object):
 
     def compare_in_thread(self):
         try:
-            result = context.backend.Compare(self.config, self.snapshot_begin, self.snapshot_end,
-                                             progress=self.set_received), None
+            comparison = context.backend.Compare(self.config, self.snapshot_begin, self.snapshot_end,
+                                                 progress=self.set_received)
+            self.dirs = comparison.dirs
+            tree = changesWindow.TreeNode("/", {}, 0, True)
+            for entry in comparison.changes:
+                self.add_path_to_tree(str(entry[0]), int(entry[1]), tree)
+            result = comparison, tree, None
         except BtrbkError as e:
-            result = None, e
+            result = None, None, e
         GLib.idle_add(self.show_comparison, *result)
 
-    def show_comparison(self, comparison, error):
+    def show_comparison(self, comparison, tree, error):
         self.stop_progress()
         if error is not None:
             self.statusbar.push(1, "Comparison failed: %s" % error)
             return False
         dbus_array = comparison.changes
         self.details = comparison.details
+        self.dirs = comparison.dirs
         self.statuses = dict(dbus_array)
 
-        # create structure to sort paths into tree
-        files_tree = changesWindow.TreeNode("/", {}, 0, True)
-        for entry in dbus_array:
-            self.add_path_to_tree(str(entry[0]), int(entry[1]), files_tree)
-
-        # self.print_tree(files_tree)
-        self.pathstreeview.set_model(self.get_treestore_from_tree(files_tree))
+        self.pathstreeview.set_model(self.get_treestore_from_tree(tree))
         # self.pathstreeview.expand_all()
 
         # display in statusbar how many files have changed
