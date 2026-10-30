@@ -9,6 +9,7 @@ from btrbrowse.remote import Remote
 def start_ui():
     parser = argparse.ArgumentParser(description="Browse and compare btrbk snapshots")
     parser.add_argument("-c", "--config", help="btrbk configuration file (default /etc/btrbk/btrbk.conf)")
+    args, rest = parser.parse_known_args()
     context.init(args.config)
     app = Application()
     signal.signal(signal.SIGINT, signal.SIG_DFL)
