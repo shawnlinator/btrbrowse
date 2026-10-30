@@ -101,7 +101,7 @@ class changesWindow(object):
 
     def selected_path(self):
         model, treeiter = self.pathstreeview.get_selection().get_selected()
-        if treeiter is None or model[treeiter][2] in ("", self.PLACEHOLDER):
+        if treeiter is None or not model[treeiter][2]:
             return None
         return model[treeiter][2]
 
@@ -190,7 +190,6 @@ class changesWindow(object):
         else:
             return "No changes"
 
-    PLACEHOLDER = "\0loading"
     COLORS = {"created": Gdk.RGBA(0.0, 0.57, 0.0), "deleted": Gdk.RGBA(0.6, 0.0, 0.0),
               "modified": Gdk.RGBA(0.49, 0.47, 0.0), "none": Gdk.RGBA(0.0, 0.0, 0.0)}
 
@@ -219,12 +218,12 @@ class changesWindow(object):
                 Gtk.STOCK_DIRECTORY if child.is_dir else Gtk.STOCK_FILE,
                 file_name, child.path, color, status_text[child.status], child])
             if child.children:
-                treestore.append(node, ["", "", self.PLACEHOLDER, self.COLORS["none"], "", None])
+                treestore.append(node, ["", "Loading...", "", self.COLORS["none"], "", None])  # no tree node: a placeholder
 
     def on_row_expanded(self, treeview, treeiter, treepath):
         store = treeview.get_model()
         first = store.iter_children(treeiter)
-        if first is not None and store[first][2] == self.PLACEHOLDER:
+        if first is not None and store[first][5] is None:
             self.fill_level(store, treeiter, store[treeiter][5])
             store.remove(first)
 
