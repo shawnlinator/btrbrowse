@@ -7,12 +7,21 @@ folds those sequences back into what happened to each path.
 """
 import re
 
+from btrbrowse.units import human_size
+
 from btrbrowse.compare import StatusFlags
 
 _ESCAPES = {"a": "\a", "b": "\b", "e": "\x1b", "f": "\f", "n": "\n", "r": "\r",
             "t": "\t", "v": "\v", " ": " ", "\\": "\\"}
 _LINE = re.compile(r"^(\w+)\s+((?:\\.|\S)+)(?:\s+(.*))?$")
 _TEMP = re.compile(r"(^|/)o\d+-\d+-\d+$")
+
+
+def _size_text(value):
+    try:
+        return human_size(int(value))
+    except (TypeError, ValueError):
+        return "%s bytes" % value
 
 
 def unescape(text):
@@ -193,7 +202,7 @@ def fold_with_dirs(text):
             if op == "clone":
                 ch.details.append("cloned data from %s" % (_attr(rest, "from") or "?"))
         elif op == "truncate":
-            get(path).add(StatusFlags.CONTENT, "truncated to %s bytes" % _attr(rest, "size"))
+            get(path).add(StatusFlags.CONTENT, "truncated to %s" % _size_text(_attr(rest, "size")))
         elif op == "chmod":
             get(path).add(StatusFlags.PERMISSIONS, "mode set to %s" % _attr(rest, "mode"))
         elif op == "chown":
@@ -216,6 +225,6 @@ def fold_with_dirs(text):
 
     for ch in changes.values():
         if ch.extents:
-            ch.details.insert(0, "%d data range%s rewritten (%d bytes)" % (
-                ch.extents, "" if ch.extents == 1 else "s", ch.bytes))
+            ch.details.insert(0, "%d data range%s rewritten (%s)" % (
+                ch.extents, "" if ch.extents == 1 else "s", human_size(ch.bytes)))
     return dict((p, c) for p, c in changes.items() if c.status and p != "/"), dirs

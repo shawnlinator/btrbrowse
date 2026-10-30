@@ -184,3 +184,15 @@ class WalkAbortTest(unittest.TestCase):
                 f.write("x")
             self.assertTrue(compare_trees(a, b))
             self.assertEqual(compare_trees(a, b, skip=("/.snaps",)), [])
+
+
+class HumanSizeTest(unittest.TestCase):
+    def test_sizes(self):
+        from btrbrowse.units import human_size
+        self.assertEqual(human_size(0), "0 bytes")
+        self.assertEqual(human_size(1), "1 byte")
+        self.assertEqual(human_size(1023), "1023 bytes")
+        self.assertEqual(human_size(1536), "1.5 KB")
+        self.assertEqual(human_size(62343245), "59.5 MB")
+        self.assertEqual(human_size(5 * 1024 ** 4), "5.0 TB")
+        self.assertEqual(human_size(5000 * 1024 ** 4), "5000.0 TB")

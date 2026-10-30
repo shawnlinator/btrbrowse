@@ -4,6 +4,7 @@ from btrbrowse import context
 from btrbrowse.btrbk import BtrbkError, CURRENT
 from btrbrowse.compare import StatusFlags
 from btrbrowse.remote import RemoteError
+from btrbrowse.units import human_size
 import os, pwd, stat, threading, subprocess, time, difflib, collections
 from gi.repository import Gtk, GtkSource, GObject, Gdk, GLib
 
@@ -88,8 +89,8 @@ class changesWindow(object):
             owner = pwd.getpwuid(st.st_uid).pw_name
         except KeyError:
             owner = str(st.st_uid)
-        return "%s: %s %s %d bytes, modified %s" % (
-            label, stat.filemode(st.st_mode), owner, st.st_size,
+        return "%s: %s %s %s, modified %s" % (
+            label, stat.filemode(st.st_mode), owner, human_size(st.st_size),
             time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)))
 
     def show_details(self, path):
@@ -281,20 +282,13 @@ class changesWindow(object):
             size, lines = self.received
             text = "Comparing... %ds" % (time.monotonic() - self.progress_start)
             if lines:
-                text += ", %s of changes received (%s lines)" % (self.human_size(size), format(lines, ","))
+                text += ", %s of changes received (%s lines)" % (human_size(size), format(lines, ","))
             else:
                 text += " (waiting for the first changes; far-apart snapshots can take minutes)"
             self.statusbar.push(3, text)
             return True
         tick()
         GLib.timeout_add(150, tick)
-
-    @staticmethod
-    def human_size(n):
-        for unit in ("B", "KB", "MB", "GB"):
-            if n < 1024 or unit == "GB":
-                return "%d %s" % (n, unit) if unit == "B" else "%.1f %s" % (n, unit)
-            n /= 1024.0
 
     def set_received(self, size, lines):
         self.received = (size, lines)  # a plain assignment, safe to make from the worker thread

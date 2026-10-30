@@ -79,7 +79,7 @@ class FoldRealDumpTest(unittest.TestCase):
 
     def test_truncate(self):
         self.has("/sparse.bin", F.CONTENT)
-        self.assertIn("truncated to 50000 bytes", self.text("/sparse.bin"))
+        self.assertIn("truncated to 48.8 KB", self.text("/sparse.bin"))
 
     def test_replaced_file_is_a_content_change(self):
         self.has("/reflink.txt", F.CONTENT)

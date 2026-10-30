@@ -21,6 +21,7 @@ import sys
 import time
 
 from btrbrowse import compare, lastsession
+from btrbrowse.units import human_size
 from btrbrowse.btrbk import Backend, fold_stream, parse_timestamp
 from btrbrowse.compare import StatusFlags, WalkAborted, compare_trees
 from btrbrowse.prompts import tty_prompt
@@ -153,8 +154,8 @@ def run_pairs(args, remote):
             total, remote_secs, parse_secs, changes, size = measure_stream(backend, begin, end)
             stream_runs.append(total)
             last = (remote_secs, parse_secs, changes, size)
-        print("stream: %s  (remote+transfer %s, parse %s, %d entries, %d bytes of stream)"
-              % (summarize(stream_runs), fmt(last[0]), fmt(last[1]), len(last[2]), last[3]))
+        print("stream: %s  (remote+transfer %s, parse %s, %d entries, %s of stream)"
+              % (summarize(stream_runs), fmt(last[0]), fmt(last[1]), len(last[2]), human_size(last[3])))
         if args.no_walk:
             continue
         walk_runs, walked, aborted = [], None, None
