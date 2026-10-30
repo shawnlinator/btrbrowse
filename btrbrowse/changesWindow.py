@@ -1,8 +1,9 @@
 from btrbrowse import context
 from btrbrowse.btrbk import BtrbkError, CURRENT
 from btrbrowse.compare import StatusFlags
-import os, pwd, stat, subprocess, time, difflib, collections
-from gi.repository import Gtk, GtkSource, GObject, Gdk
+from btrbrowse.remote import RemoteError
+import os, pwd, stat, threading, subprocess, time, difflib, collections
+from gi.repository import Gtk, GtkSource, GObject, Gdk, GLib
 
 
 class changesWindow(object):
@@ -225,10 +226,27 @@ class changesWindow(object):
         if self.loaded:
             return False
         self.loaded = True
+        remote = context.backend.remote
+        if remote:
+            try:
+                remote.ensure()  # may show the connect dialog, which must run on this thread
+            except RemoteError as e:
+                self.statusbar.push(1, "Comparison failed: %s" % e)
+                return False
+        self.statusbar.push(1, "Comparing... (snapshots far apart can take minutes)")
+        threading.Thread(target=self.compare_in_thread, daemon=True).start()
+        return False
+
+    def compare_in_thread(self):
         try:
-            comparison = context.backend.Compare(self.config, self.snapshot_begin, self.snapshot_end)
+            result = context.backend.Compare(self.config, self.snapshot_begin, self.snapshot_end), None
         except BtrbkError as e:
-            self.statusbar.push(1, "Comparison failed: %s" % e)
+            result = None, e
+        GLib.idle_add(self.show_comparison, *result)
+
+    def show_comparison(self, comparison, error):
+        if error is not None:
+            self.statusbar.push(1, "Comparison failed: %s" % error)
             return False
         dbus_array = comparison.changes
         self.details = comparison.details
