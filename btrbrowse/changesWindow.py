@@ -118,7 +118,11 @@ class changesWindow(object):
     def on_meld_clicked(self, widget):
         path = self.selected_path() or ""
         try:
-            subprocess.Popen(["meld", self.beginpath + path, self.endpath + path])
+            sides = [self.beginpath + path, self.endpath + path]
+            if path:
+                # a file that was created or deleted: compare against an empty file, not an error
+                sides = [side if os.path.lexists(side) else os.devnull for side in sides]
+            subprocess.Popen(["meld"] + sides)
         except OSError as e:
             self.show_error("Could not start meld: %s" % e)
 
