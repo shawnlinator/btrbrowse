@@ -3,7 +3,7 @@ from gi.repository import Gtk, GLib, Gio
 from btrbrowse import context
 from btrbrowse.mainWindow import BtrbrowseGUI
 from btrbrowse.prompts import gtk_prompt, make_askpass_script
-from btrbrowse.remote import Remote
+from btrbrowse.remote import Cancelled, Remote, RemoteError
 
 
 def start_ui():
@@ -51,7 +51,16 @@ class Application(Gtk.Application):
         """Use a remote host's btrbk (e.g. a VM's hypervisor); asks for every detail."""
         self.disconnect_remote()
         backend = context.backend
-        backend.remote = Remote(gtk_prompt(self.btrbrowse.window), askpass=make_askpass_script())
+        remote = Remote(gtk_prompt(self.btrbrowse.window), askpass=make_askpass_script())
+        try:
+            remote.ensure()  # asks for the host and key now, so cancelling leaves us local
+        except RemoteError as e:
+            if not isinstance(e, Cancelled):
+                self.btrbrowse.show_error("Could not connect:\n%s" % e)
+            if os.path.exists(remote.askpass):
+                os.unlink(remote.askpass)
+            return
+        backend.remote = remote
         self.btrbrowse.load()
 
     def disconnect_remote(self, action=None, param=None):

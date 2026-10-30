@@ -38,6 +38,7 @@ class BtrbrowseGUI():
     def add_toolbar_buttons(self):
         toolbar = self.builder.get_object("toolbar1")
         for label, tooltip, handler in (
+                ("Connect...", "Use btrbk on a remote host (asks for the host and ssh key)", self.on_connect),
                 ("Compare in meld", "Compare the first and last selected snapshot in meld", self.on_compare_meld),
                 ("Roll back", "Replace the live subvolume with the selected snapshot", self.on_rollback),
                 ("Refresh", "Reload snapshots, backups and the log", self.on_refresh)):
@@ -57,8 +58,11 @@ class BtrbrowseGUI():
             configs = context.backend.ListConfigs()
             self.dir_mtimes = self.read_dir_mtimes()
         except BtrbkError as e:
-            self.show_error("Could not read btrbk configuration %s:\n%s" % (context.backend.config, e))
             configs = []
+            if not context.backend.remote and not os.path.exists(context.backend.config):
+                GLib.idle_add(self.offer_connect, str(e))
+            else:
+                self.show_error("Could not read btrbk configuration %s:\n%s" % (context.backend.config, e))
         for config in configs:
             name = str(config[0])
             self.configView[name] = snapshotsView(name)
@@ -92,6 +96,20 @@ class BtrbrowseGUI():
             self.statusbar.push(1, "Snapshots changed on disk, reloading")
             self.load()
         return True
+
+    def on_connect(self, *args):
+        self.window.get_application().activate_action("connect", None)
+
+    def offer_connect(self, error):
+        dialog = Gtk.MessageDialog(self.window, 0, Gtk.MessageType.QUESTION, Gtk.ButtonsType.YES_NO,
+                                   "No local btrbk configuration found.")
+        dialog.format_secondary_text("%s\n\nConnect to a remote host that runs btrbk (for example the "
+                                     "hypervisor of this VM)?" % error)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer == Gtk.ResponseType.YES:
+            self.on_connect()
+        return False
 
     def show_error(self, message):
         dialog = Gtk.MessageDialog(self.window, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, message)
